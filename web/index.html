@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#050505">
+  <title>Dashboard — Orbix Signal Lab</title>
+  <link rel="stylesheet" href="/static/styles.css?v=9">
+</head>
+<body>
+  <div class="noise" aria-hidden="true"></div>
+  <header class="topbar shell">
+    <a class="brand" href="#dashboard" aria-label="Orbix Signal Lab dashboard">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 52 52" role="img">
+          <circle cx="26" cy="26" r="19" fill="none" stroke="currentColor" stroke-width="1.4"/>
+          <ellipse cx="26" cy="26" rx="23" ry="9" fill="none" stroke="currentColor" stroke-width="1" transform="rotate(-33 26 26)"/>
+          <path d="M18 34 34 13l-5 19-13 7 2-5Z" fill="currentColor"/>
+          <circle cx="34" cy="13" r="2" fill="#050505"/>
+        </svg>
+      </span>
+      <span class="brand-copy"><strong>ORBIX</strong><small>SIGNAL LAB</small></span>
+    </a>
+    <nav class="top-nav" aria-label="Main navigation">
+      <a href="#dashboard" data-route="dashboard" class="active" aria-current="page">Dashboard</a>
+      <a href="#engine" data-route="engine">Signal engine</a>
+      <a href="#backtest" data-route="backtest">Backtest</a>
+      <a href="#data" data-route="data">Data</a>
+      <a href="#connections" data-route="connections">Connections</a>
+      <a href="#paper" data-route="paper">Paper log</a>
+      <a href="#strategy-lab" data-route="strategy-lab">Strategy lab</a>
+    </nav>
+    <div class="top-status">
+      <span class="status-dot"></span><span id="sourceBadge">SYNTHETIC DEMO</span>
+      <span class="status-divider"></span><span class="top-status-muted">ORDERS OFF</span>
+    </div>
+  </header>
+
+  <section class="connection-strip shell" aria-label="Global data-provider connection status">
+    <span class="connection-indicator" id="connectionIndicator" aria-hidden="true"></span>
+    <div class="connection-summary"><span class="connection-kicker">DATA PROVIDER</span><strong id="connectionStatus" role="status" aria-live="polite">NOT CONNECTED</strong><span id="connectionDetail">No provider configured · synthetic demo active</span></div>
+    <div class="credit-dashboard" id="creditDashboard">
+      <button class="credit-trigger" id="creditDashboardTrigger" type="button" aria-controls="creditDashboardPopup" aria-expanded="false" aria-label="Show API credit usage, limits, and configured keys">
+        <span class="credit-trigger-label">API CREDITS</span><strong id="creditTriggerCount">0 / 20</strong><span class="credit-chevron" aria-hidden="true">⌄</span>
+      </button>
+      <section class="credit-popup" id="creditDashboardPopup" aria-labelledby="creditPopupTitle" role="dialog" aria-modal="false" hidden>
+        <header class="credit-popup-header">
+          <div><div class="eyebrow small-eyebrow">KEY QUOTA OVERVIEW</div><h2 id="creditPopupTitle">API credit usage</h2></div>
+          <button class="credit-popup-close" id="creditPopupClose" type="button" aria-label="Close API credits popup">×</button>
+        </header>
+        <div class="credit-metrics">
+          <div class="credit-metric"><span>KEYS</span><strong id="creditKeyCount">0 / 20</strong></div>
+          <div class="credit-metric"><span>CREDITS USED</span><strong id="creditUsed">—</strong></div>
+          <div class="credit-metric"><span>LIMIT</span><strong id="creditLimit">—</strong></div>
+        </div>
+        <p class="credit-popup-note" id="creditPopupNote">Provider quota data is unavailable until a provider-specific usage adapter is connected. No quota request is being made.</p>
+        <div class="credit-key-list" id="creditKeyRows" aria-live="polite"></div>
+        <a class="credit-manage-link" id="creditManageConnection" href="#connections" data-route="connections">MANAGE API KEYS ↗</a>
+      </section>
+    </div>
+  </section>
+
+  <section class="notice shell" id="feedNotice" role="status">
+    <span class="notice-icon">i</span>
+    <div id="feedNoticeText"><strong>Synthetic demo prices are active.</strong> No live FX feed or Quotex connection is installed. Signals and test results are not real-market results.</div>
+    <button class="notice-dismiss" id="dismissNotice" aria-label="Dismiss notice">×</button>
+  </section>
+
+  <main class="shell app-main" id="appMain">
+    <section class="page-view is-active" id="page-dashboard" data-page="dashboard" aria-labelledby="dashboard-title">
+      <div class="hero">
+        <div class="hero-copy">
+          <div class="eyebrow"><span class="eyebrow-line"></span> ONE-MINUTE FX RESEARCH</div>
+          <h1 id="dashboard-title">Read the moment.<br><span>Wait for the signal.</span></h1>
+          <p>Orbix studies completed M1 candles and gives a clear BUY, SELL, or NO SIGNAL result. This build is for research and paper testing.</p>
+          <div class="hero-tags">
+            <span>01 / SIGNAL ONLY</span><span>02 / WALK-FORWARD TESTS</span><span>03 / LEARNING LOOP</span>
+          </div>
+        </div>
+        <div class="hero-art">
+          <canvas id="blackholeCanvas" aria-hidden="true"></canvas>
+          <span class="art-caption">THE QUIET<br>BEFORE THE MOVE</span>
+          <span class="art-index">O—01 / EVENT HORIZON</span>
+          <span class="sr-only">Decorative monochrome black hole animation.</span>
+        </div>
+      </div>
+
+      <div class="dashboard-grid">
+        <article class="panel chart-panel">
+          <div class="panel-heading">
+            <div>
+              <div class="eyebrow small-eyebrow">MARKET VIEW <span class="tiny-live"></span></div>
+              <h2><span id="pairTitle">EUR/USD</span> <span class="timeframe">· M1</span></h2>
+            </div>
+            <div class="chart-controls">
+              <label class="sr-only" for="pairSelect">Currency pair</label>
+              <select id="pairSelect" class="select-control">
+                <option>EUR/USD</option><option>GBP/USD</option><option>USD/JPY</option><option>AUD/USD</option><option>USD/INR</option>
+              </select>
+              <span class="time-pill">1 MIN</span>
+            </div>
+          </div>
+          <div class="price-row">
+            <div class="price-block"><span class="muted-label">LATEST CLOSE</span><strong id="latestPrice">—</strong></div>
+            <div class="price-meta"><span id="latestTime">Waiting for candles…</span><span class="source-note" id="marketSource">Synthetic sample</span></div>
+          </div>
+          <div class="chart-wrap"><canvas id="priceChart" aria-label="One-minute candle chart"></canvas><div class="chart-empty" id="chartEmpty">Loading price candles…</div></div>
+          <div class="chart-foot"><span><i class="legend-candle up"></i> UP CANDLE</span><span><i class="legend-candle down"></i> DOWN CANDLE</span><span class="chart-foot-right" id="chartRange">—</span></div>
+        </article>
+
+        <article class="panel snapshot-panel">
+          <div class="panel-heading">
+            <div><div class="eyebrow small-eyebrow">LATEST READ</div><h2>Signal snapshot</h2></div>
+            <span class="mode-tag">PAPER ONLY</span>
+          </div>
+          <div class="snapshot-read">
+            <div class="snapshot-glyph" id="dashboardSignalGlyph">◌</div>
+            <div class="snapshot-copy"><span class="muted-label" id="dashboardSignalPair">EUR/USD · M1</span><strong id="dashboardSignalSide">READY</strong><span id="dashboardSignalReason">Generate a signal to see the latest read.</span></div>
+          </div>
+          <div class="snapshot-time"><span>ENTRY TIME</span><strong id="dashboardSignalTimestamp">No signal yet</strong></div>
+          <a class="button button-secondary snapshot-button" href="#engine" data-route="engine">OPEN SIGNAL ENGINE <span class="button-arrow">↗</span></a>
+          <p class="micro-copy">NO SIGNAL is a valid outcome. Orbix never places broker orders.</p>
+        </article>
+      </div>
+
+      <section class="metrics-grid" aria-label="Research status">
+        <article class="metric-card"><span class="metric-kicker">DATA WINDOW</span><strong id="candleCount">—</strong><small>completed M1 candles</small><span class="metric-mark">01</span></article>
+        <article class="metric-card"><span class="metric-kicker">ACTIVE PROTOTYPES</span><strong>04</strong><small>signal methods ready to test</small><span class="metric-mark">02</span></article>
+        <article class="metric-card"><span class="metric-kicker">RESEARCH CANDIDATES</span><strong>30</strong><small>ideas catalogued, not all coded</small><span class="metric-mark">03</span></article>
+        <article class="metric-card"><span class="metric-kicker">TRADE EXECUTION</span><strong>OFF</strong><small>signals only · no broker orders</small><span class="metric-mark">04</span></article>
+      </section>
+
+      <section class="route-card-grid" aria-label="Research pages">
+        <a class="route-card" href="#backtest" data-route="backtest"><span class="route-card-number">01</span><strong>Test an idea</strong><small>Walk-forward paper results</small><span class="route-card-arrow">↗</span></a>
+        <a class="route-card" href="#data" data-route="data"><span class="route-card-number">02</span><strong>Bring your data</strong><small>Import M1 candle history</small><span class="route-card-arrow">↗</span></a>
+        <a class="route-card" href="#strategy-lab" data-route="strategy-lab"><span class="route-card-number">03</span><strong>Explore strategies</strong><small>Four prototypes · 30 ideas</small><span class="route-card-arrow">↗</span></a>
+      </section>
+    </section>
+
+    <section class="page-view" id="page-engine" data-page="engine" aria-labelledby="engine-title" hidden>
+      <header class="page-heading">
+        <div><div class="eyebrow"><span class="eyebrow-line"></span> DECISION WORKSPACE</div><h1 id="engine-title">Signal engine</h1><p>Generate research signals from completed candles. Each signal is timestamped for the next minute boundary, one minute before its default prediction expiry.</p></div>
+        <div class="blackhole-mini" aria-hidden="true"><i class="mini-ring ring-one"></i><i class="mini-ring ring-two"></i><b></b></div>
+      </header>
+      <div class="engine-layout">
+        <article class="panel signal-panel">
+          <div class="panel-heading">
+            <div><div class="eyebrow small-eyebrow">PREDICTION ENGINE</div><h2>Signal output <span class="small-pair" id="enginePairLabel">EUR/USD · M1</span></h2></div>
+            <span class="mode-tag">PAPER</span>
+          </div>
+          <label class="field-label" for="strategySelect">Signal method</label>
+          <select id="strategySelect" class="select-control full-width"><option value="ml_consensus">Orbix ML + trend agreement</option></select>
+          <div class="signal-result" id="signalResult">
+            <div class="signal-glyph" id="signalGlyph">◌</div>
+            <div class="signal-copy"><span class="muted-label">CURRENT READ</span><strong id="signalSide">READY</strong><span id="signalReason">Generate a signal to see the result.</span></div>
+          </div>
+          <div class="signal-details">
+            <div><span>ENTRY TIME</span><strong id="entryTime">—</strong></div>
+            <div><span>LEAD TIME</span><strong id="signalLeadTime">1 minute</strong></div>
+            <div><span>PREDICTION / EXPIRY</span><strong id="expiryTime">1 minute later</strong></div>
+            <div><span>MODEL P(UP)</span><strong id="modelScore">—</strong></div>
+          </div>
+          <button class="button button-primary generate-button" id="generateButton"><span>GENERATE SIGNAL</span><span class="button-arrow">↗</span></button>
+          <p class="micro-copy">Model P(up) is a raw, uncalibrated estimate—not a reliable probability or guarantee. “NO SIGNAL” is a valid result.</p>
+        </article>
+        <aside class="panel engine-notes">
+          <div class="eyebrow small-eyebrow">HOW TO READ IT</div><h2>Signal, not autopilot.</h2>
+          <p class="panel-intro">Every signal uses the latest completed M1 candle. Its entry timestamp is set at the next minute boundary, before the target candle resolves.</p>
+          <div class="note-step"><span>01</span><p><strong>Entry time</strong><br>The next minute boundary after the latest completed candle.</p></div>
+          <div class="note-step"><span>02</span><p><strong>One-minute lead</strong><br>The signal is generated at entry time, one minute before the default prediction expiry.</p></div>
+          <div class="note-step"><span>03</span><p><strong>Prediction / expiry</strong><br>The target outcome is evaluated one minute later for the default M1 horizon.</p></div>
+          <a class="text-button inline-link" href="#dashboard" data-route="dashboard">CHANGE PAIR ON DASHBOARD ↗</a>
+        </aside>
+      </div>
+    </section>
+
+    <section class="page-view" id="page-backtest" data-page="backtest" aria-labelledby="backtest-title" hidden>
+      <header class="page-heading">
+        <div><div class="eyebrow"><span class="eyebrow-line"></span> CHRONOLOGICAL EVALUATION</div><h1 id="backtest-title">Walk-forward testing</h1><p>Orbix automatically tests imported M1 history on later unseen candles when the data, strategy, or payout changes. The assumed payout is not fetched from a broker.</p></div>
+        <div class="blackhole-mini" aria-hidden="true"><i class="mini-ring ring-one"></i><i class="mini-ring ring-two"></i><b></b></div>
+      </header>
+      <article class="panel backtest-panel">
+        <div class="panel-heading">
+          <div><div class="eyebrow small-eyebrow">HISTORICAL CHECK <span class="small-pair" id="backtestPairLabel">EUR/USD · M1</span></div><h2>Walk-forward paper test</h2></div>
+          <span class="mode-tag">NO REAL MONEY</span>
+        </div>
+        <p class="panel-intro">Walk-forward testing runs automatically after import or dataset/strategy/payout changes. It trains on earlier candles, tests on later candles, and updates only after outcomes mature. Use the button to rerun; synthetic demo data is excluded from automatic accuracy reports.</p>
+        <div class="test-controls">
+          <div class="payout-control"><label class="field-label" for="payoutInput">Assumed winning payout</label><div class="input-suffix"><input id="payoutInput" type="number" min="1" max="100" value="80"><span>%</span></div></div>
+          <button class="button button-secondary" id="backtestButton"><span>RUN WALK-FORWARD TEST</span><span class="button-arrow">↗</span></button>
+        </div>
+        <div class="backtest-results" id="backtestResults">
+          <div class="result-stat"><span>SIGNALS</span><strong id="btSignals">—</strong></div>
+          <div class="result-stat"><span>WIN RATE</span><strong id="btWinRate">—</strong></div>
+          <div class="result-stat"><span>NET UNITS</span><strong id="btNet">—</strong></div>
+          <div class="result-stat"><span>BREAK-EVEN RATE</span><strong id="btBreakEven">—</strong></div>
+        </div>
+        <p class="micro-copy" id="backtestNote">Automatic walk-forward testing requires imported M1 history. Synthetic demo candles are not used for automatic accuracy reports.</p>
+      </article>
+      <div class="page-footnote"><span class="footnote-mark">!</span><p>Historical dry-run only. Win rates and assumed payout do not predict future performance; synthetic demo candles are artificial.</p></div>
+    </section>
+
+    <section class="page-view" id="page-data" data-page="data" aria-labelledby="data-title" hidden>
+      <header class="page-heading">
+          <div><div class="eyebrow"><span class="eyebrow-line"></span> MARKET HISTORY</div><h1 id="data-title">Data workspace</h1><p>Upload large completed M1 histories to the local archive. Orbix streams files in chunks and keeps only a small recent window in memory.</p></div>
+        <div class="blackhole-mini" aria-hidden="true"><i class="mini-ring ring-one"></i><i class="mini-ring ring-two"></i><b></b></div>
+      </header>
+      <div class="data-layout">
+        <article class="panel import-panel">
+          <div class="panel-heading">
+            <div><div class="eyebrow small-eyebrow">YOUR PRICE HISTORY</div><h2>Import M1 candles</h2></div>
+            <span class="upload-icon">⇧</span>
+          </div>
+          <p class="panel-intro">Upload M1 OHLCV CSV: <code>timestamp, open, high, low, close, volume</code>. Use UTC ISO-8601 candle-open times and at least 120 completed candles. The server streams files up to 1 GB into local storage.</p>
+          <label class="upload-drop" for="csvFile"><span class="upload-plus">＋</span><span><strong>Choose a CSV file</strong><small>At least 120 completed candles · 1 GB max</small></span><input type="file" id="csvFile" accept=".csv,text/csv"></label>
+          <div class="import-status" id="importStatus">No file selected</div>
+          <div class="data-actions"><button class="text-button" id="resetDemoButton">Return to demo data <span>↗</span></button><span class="small-pair" id="importPairLabel">Selected pair: EUR/USD</span></div>
+        </article>
+        <aside class="panel data-guide">
+          <div class="eyebrow small-eyebrow">FILE CHECKLIST</div><h2>Clean inputs matter.</h2>
+          <ul class="check-list">
+            <li>One row per completed one-minute candle.</li>
+            <li>Timestamps in ascending order; UTC is recommended.</li>
+            <li>Each row needs open, high, low, and close.</li>
+            <li>New imports are archived; earlier datasets are retained.</li>
+          </ul>
+          <div class="storage-card">
+            <div class="storage-card-heading"><span>LOCAL CANDLE ARCHIVE</span><button class="text-button" id="refreshStorage">REFRESH ↻</button></div>
+            <div class="storage-stat-grid">
+              <div><span>DATASETS</span><strong id="storageDatasetCount">—</strong></div>
+              <div><span>STORED CANDLES</span><strong id="storageCandleCount">—</strong></div>
+              <div><span>FILE SIZE</span><strong id="storageFileSize">—</strong></div>
+              <div><span>HOT WINDOW</span><strong id="storageHotWindow">—</strong></div>
+            </div>
+            <p id="storageArchiveNote"><code>data/candles.duckdb</code> · old CSV imports remain archived after switching to demo.</p>
+            <div class="dataset-history" id="datasetHistory" aria-label="Archived candle datasets"><p class="dataset-empty">No imported datasets archived yet.</p></div>
+          </div>
+          <div class="learning-card">
+            <div class="eyebrow small-eyebrow">OUTCOME LEARNING</div>
+            <div class="learning-stat-line"><strong id="learningUpdateCount">0</strong><span>online updates</span><strong id="learningAccuracy">—</strong><span>pre-update direction accuracy</span></div>
+            <p id="learningNote">Imported-data outcomes update the model only after a confirmed expiry price or matching completed candle arrives. Demo data never trains it.</p>
+            <small>Append completed M1 bars through <code>POST /api/candles/append</code> to auto-resolve matching expired paper signals.</small>
+          </div>
+          <div class="guide-warning"><strong>No provider feed yet</strong><span>The Connections form does not fetch prices. Automatic expiry updates happen only when new candles are appended to an imported dataset.</span></div>
+          <a class="text-button inline-link" href="#dashboard" data-route="dashboard">SELECT PAIR ON DASHBOARD ↗</a>
+        </aside>
+      </div>
+    </section>
+
+    <section class="page-view" id="page-connections" data-page="connections" aria-labelledby="connections-title" hidden>
+      <header class="page-heading">
+        <div><div class="eyebrow"><span class="eyebrow-line"></span> PROVIDER SETUP</div><h1 id="connections-title">Data connections</h1><p>Enter a provider endpoint and up to 20 API keys. Connection status stays visible above every page.</p></div>
+        <div class="blackhole-mini" aria-hidden="true"><i class="mini-ring ring-one"></i><i class="mini-ring ring-two"></i><b></b></div>
+      </header>
+      <div class="connection-layout">
+        <article class="panel provider-form-panel">
+          <div class="panel-heading"><div><div class="eyebrow small-eyebrow">SESSION CONFIGURATION</div><h2>Provider details</h2></div><span class="mode-tag">KEYS NOT SENT</span></div>
+          <label class="field-label" for="providerName">Data provider name</label>
+          <input class="provider-input" id="providerName" type="text" placeholder="e.g. Your FX data provider" autocomplete="off" maxlength="80">
+          <label class="field-label" for="providerApiUrl">Provider API base URL</label>
+          <input class="provider-input" id="providerApiUrl" type="url" placeholder="https://api.provider.example/v1" autocomplete="url" spellcheck="false">
+          <div class="key-list-heading"><div><span class="field-label">API keys</span><span class="key-count" id="providerKeyCount">0 / 20 active</span></div><button class="button button-secondary add-key-button" id="addKeyButton" type="button">ADD KEY <span>＋</span></button></div>
+          <div class="key-slots" id="keySlots" aria-label="API key inputs"></div>
+          <div class="provider-actions">
+            <button class="button button-primary" id="saveProviderButton" type="button">KEEP FOR THIS SESSION <span class="button-arrow">↗</span></button>
+            <button class="text-button" id="clearProviderButton" type="button">CLEAR CONFIG</button>
+          </div>
+          <p class="micro-copy" id="providerFormStatus" role="status">Keys stay in browser memory only. They are not saved to disk or sent to Orbix’s server.</p>
+        </article>
+        <aside class="panel provider-status-panel">
+          <div class="eyebrow small-eyebrow">CONNECTION STATUS</div>
+          <div class="provider-state-card"><span class="connection-indicator" id="providerStatusIndicator" aria-hidden="true"></span><div><span class="muted-label">CURRENT STATE</span><strong id="providerPageState">NOT CONNECTED</strong></div></div>
+          <p class="panel-intro" id="providerPageMessage">No provider is configured. Synthetic demo data remains active.</p>
+          <div class="provider-status-notice"><strong>A live adapter is still needed</strong><span>The provider has not been specified, so Orbix cannot safely test authentication or fetch prices yet. Saving these fields does not connect a data feed.</span></div>
+          <div class="provider-security"><span class="security-symbol">◇</span><p><strong>Session-only keys</strong><br>Values are kept in this page’s memory and cleared when it reloads. No localStorage, database, or outbound request is used.</p></div>
+        </aside>
+      </div>
+    </section>
+
+    <section class="page-view" id="page-paper" data-page="paper" aria-labelledby="paper-title" hidden>
+      <header class="page-heading">
+        <div><div class="eyebrow"><span class="eyebrow-line"></span> PAPER OUTCOME TRACKING</div><h1 id="paper-title">Paper log</h1><p>Review BUY/SELL signals by their entry time and prediction expiry. Matching completed candles can auto-resolve imported-data outcomes; manual exit-price entry remains available.</p></div>
+        <div class="blackhole-mini" aria-hidden="true"><i class="mini-ring ring-one"></i><i class="mini-ring ring-two"></i><b></b></div>
+      </header>
+      <article class="panel history-panel">
+        <div class="panel-heading"><div><div class="eyebrow small-eyebrow">SIGNAL HISTORY</div><h2>Recent signals</h2></div><button class="text-button" id="refreshHistory">REFRESH ↻</button></div>
+        <div class="history-table-wrap">
+          <table class="history-table"><thead><tr><th>PAIR</th><th>METHOD</th><th>READ</th><th>ENTRY TIME</th><th>PREDICTION TIME</th><th>STATUS</th><th>PAPER EXIT PRICE</th></tr></thead><tbody id="historyRows"><tr><td colspan="7" class="empty-row">No generated signals yet.</td></tr></tbody></table>
+        </div>
+        <p class="micro-copy">Imported-data signals update the online model once, after a completed expiry candle arrives or you enter a confirmed expiry price. Ties and synthetic demo outcomes do not change model weights.</p>
+        <p class="micro-copy" id="paperLogStatus" role="status"></p>
+      </article>
+      <div class="page-footnote"><span class="footnote-mark">i</span><p>Synthetic demo outcomes are marked DEMO ONLY and never train the model. Imported outcomes stay tied to their persistent dataset stream and are learned at most once.</p></div>
+    </section>
+
+    <section class="page-view" id="page-strategy-lab" data-page="strategy-lab" aria-labelledby="strategy-title" hidden>
+      <header class="page-heading">
+        <div><div class="eyebrow"><span class="eyebrow-line"></span> RESEARCH QUEUE</div><h1 id="strategy-title">Strategy lab <span class="count-badge">30</span></h1><p>Four transparent prototypes can be run now. The rest are ideas to implement and validate—not claims of profitability.</p></div>
+        <div class="blackhole-mini" aria-hidden="true"><i class="mini-ring ring-one"></i><i class="mini-ring ring-two"></i><b></b></div>
+      </header>
+      <article class="panel lab-panel">
+        <div class="panel-heading"><div><div class="eyebrow small-eyebrow">EXECUTABLE RULES</div><h2>Prototype methods</h2></div><button class="collapse-button" id="toggleCatalog" aria-expanded="false">SHOW ALL 30 <span>＋</span></button></div>
+        <p class="panel-intro">Trend-pullback and range-reversal entries are approximate prototypes. The 20-candle breakout does not require a retest, so “breakout and retest” remains research-only.</p>
+        <div class="prototype-list" id="prototypeList"></div>
+        <div class="catalog-list" id="catalogList" hidden></div>
+      </article>
+    </section>
+  </main>
+
+  <footer class="footer shell">
+    <div class="footer-brand"><span class="footer-mark">O</span><span>ORBIX <small>RESEARCH BUILD 0.1</small></span></div>
+    <p>Signal research only. Not financial advice. No live data, Quotex login, or real trades.</p>
+    <span class="footer-right">BUILT FOR BETTER QUESTIONS</span>
+  </footer>
+  <script src="/static/app.js?v=9" defer></script>
+</body>
+</html>
