@@ -89,6 +89,45 @@ class DatasetLearningTests(unittest.TestCase):
             self.assertIn("not paper trades", card["dataset"]["note"])
             runtime.candle_store.close()
 
+    def test_a_bar_already_learned_by_a_signal_is_not_double_weighted(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first = datetime(2025, 5, 1, tzinfo=UTC)
+            history = root / "history.csv"
+            write_history(history, 320, first)
+            runtime = Runtime(data_dir=root / "data")
+            runtime.import_csv_file(history, "EUR/USD")
+            dataset_id = runtime.dataset_id()
+
+            append = root / "first.csv"
+            write_history(append, 10, first + timedelta(minutes=320))
+            runtime.append_csv_file(append)
+            self.assertEqual(runtime.ledger.dataset_summary(dataset_id)["total"], 9)
+
+            features = compute_features(runtime.candles)[-1]
+            runtime.ledger.record_learning_event(
+                signal_id="paper-covered",
+                pair="EUR/USD",
+                dataset_id=dataset_id,
+                label=1,
+                probability_up=0.55,
+                correct=True,
+                model_updated=True,
+                kind="paper",
+                features=features,
+                entry_time=(first + timedelta(minutes=331)).isoformat(),
+            )
+
+            second = root / "second.csv"
+            write_history(second, 2, first + timedelta(minutes=330))
+            result = runtime.append_csv_file(second)
+            learning = result["dataset_learning"]
+            self.assertEqual(learning["covered_by_signal"], 1)
+            self.assertEqual(learning["processed"], 2)
+            self.assertEqual(learning["learned"], 1)
+            self.assertEqual(runtime.ledger.dataset_summary(dataset_id)["total"], 10)
+            runtime.candle_store.close()
+
     def test_a_gap_is_not_faked_into_a_one_minute_horizon(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

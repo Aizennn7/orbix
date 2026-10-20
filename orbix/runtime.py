@@ -614,7 +614,9 @@ class Runtime:
                 calibration = engine.recalibrate(model, force=True)
             changed = bool(learned) or bool(calibration is not None and calibration.get("accepted"))
             if changed:
-                self._ensembles.pop(self.pair, None)
+                # Keep the cached bootstrap members until the 15-minute
+                # maintenance cycle; rebuilding three models every minute would
+                # add cost without changing the champion's probability.
                 self._save_champion(self.pair, model)
                 self.models[self.pair] = model
             self.ledger.set_dataset_entry_time(dataset_id, last_entry)
