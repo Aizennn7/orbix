@@ -1679,9 +1679,9 @@ class AutomationService:
             "Dashboard authentication",
             False,
             "ready" if auth_enabled else "warning",
-            "HTTP Basic authentication is enabled; serve it behind HTTPS."
+            "The login page and signed session cookies are enabled; serve the dashboard behind HTTPS."
             if auth_enabled
-            else "No dashboard password is set. Anyone who can reach this URL can change keys, pause signals, or post to Telegram.",
+            else "No dashboard password or hash is set. Anyone who can reach this URL can change keys, pause signals, or post to Telegram.",
         )
         check(
             "execution",
