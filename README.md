@@ -109,6 +109,18 @@ PORT=10000 ORBIX_DATA_DIR=/var/lib/orbix bash startup.sh
 
 Point the platform's health check at `/healthz` and keep the data directory on a real disk.
 
+### Android phone (Termux)
+
+The full app runs on an ARM64 phone inside a Debian container managed by Termux, reached at `http://127.0.0.1:8000` from the phone's own browser. No APK is involved; Android cannot run Python natively.
+
+```bash
+# in Termux, from F-Droid
+curl -fsSL https://raw.githubusercontent.com/Aizennn7/orbix/main/scripts/termux-setup.sh -o termux-setup.sh
+bash termux-setup.sh
+```
+
+See [TERMUX.md](TERMUX.md) for the walkthrough, the home-screen widget, battery settings, and the Android 12 process-killer caveat.
+
 ## Run it without live credentials
 
 ```bash
