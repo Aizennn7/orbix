@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#050505">
   <title>Dashboard — Orbix Signal Lab</title>
-  <link rel="stylesheet" href="/static/styles.css?v=18">
+  <link rel="stylesheet" href="/static/styles.css?v=19">
 </head>
 <body>
   <div class="noise" aria-hidden="true"></div>
@@ -154,7 +154,7 @@
             <span class="mode-tag">PAPER</span>
           </div>
           <label class="field-label" for="strategySelect">Signal method</label>
-          <select id="strategySelect" class="select-control full-width"><option value="orbix_confluence">Orbix Confluence Gate</option><option value="ml_consensus">Orbix ML + trend agreement</option></select>
+          <select id="strategySelect" class="select-control full-width"><option value="orbix_confluence">Orbix Confluence Gate</option><option value="ml_consensus">Orbix ML + trend agreement</option><option value="orbix_cadence">Orbix Cadence Read (3-min collection)</option></select>
           <div class="signal-result" id="signalResult">
             <div class="signal-glyph" id="signalGlyph">◌</div>
             <div class="signal-copy"><span class="muted-label">CURRENT READ</span><span class="signal-headline" id="signalHeadline">ORAC V1 · WAITING</span><strong id="signalSide">READY</strong><span id="signalReason">Generate a signal to see the result.</span></div>
@@ -447,7 +447,7 @@
 
     <section class="page-view" id="page-trader" data-page="trader" aria-labelledby="trader-title" hidden>
       <header class="page-heading">
-        <div><div class="eyebrow"><span class="eyebrow-line"></span> HUMAN-STYLE DISCIPLINE</div><h1 id="trader-title">Trader</h1><p>It sleeps outside its sessions, takes a handful of setups, waits after losses, stops at its daily limit, and remembers the contexts that burned it. These rules only reduce activity. They are not an accuracy claim.</p></div>
+        <div><div class="eyebrow"><span class="eyebrow-line"></span> STEADY CADENCE · HARD LIMITS</div><h1 id="trader-title">Trader</h1><p>It collects a model read roughly every three minutes inside London and New York hours, caps the day, cools off after a losing run, and remembers contexts that burned it. A full stream is not an edge.</p></div>
         <div class="blackhole-mini" aria-hidden="true"><i class="mini-ring ring-one"></i><i class="mini-ring ring-two"></i><b></b></div>
       </header>
       <div class="future-layout">
@@ -463,6 +463,7 @@
             <div><span>COOL-OFF / SPACING</span><strong id="traderWait">—</strong></div>
           </div>
           <p class="micro-copy" id="traderGradeNote">Conviction is a label, not a probability of profit.</p>
+          <p class="micro-copy">Cadence is a collection rhythm, not a quality claim. The measured paper record in TODAY'S REVIEW is the only evidence that matters.</p>
           <p class="micro-copy" id="traderConfigError" role="status" hidden></p>
         </article>
         <aside class="panel future-evidence-panel">
@@ -559,6 +560,6 @@
     <p>Signal research only. Live feeds are optional/configured on the server. No Quotex login or real trades.</p>
     <span class="footer-right">BUILT FOR BETTER QUESTIONS</span>
   </footer>
-  <script src="/static/app.js?v=18" defer></script>
+  <script src="/static/app.js?v=19" defer></script>
 </body>
 </html>

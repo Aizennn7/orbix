@@ -699,7 +699,7 @@ class Runtime:
                 if (
                     self.source == "IMPORTED CSV"
                     and learning_model is not None
-                    and strategy_id in {"ml_consensus", "orbix_confluence"}
+                    and strategy_id in {"ml_consensus", "orbix_confluence", "orbix_cadence"}
                     and classify_reason(signal.reason) == "flat_calibration"
                 ):
                     preview = self.engine.raw_shadow(

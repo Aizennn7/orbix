@@ -253,7 +253,7 @@ class DisciplineAutomationTests(unittest.TestCase):
             self.assertEqual(payload["side"], "BUY")
             self.assertEqual(payload["discipline"]["grade"], "A")
             self.assertGreaterEqual(payload["discipline"]["conviction"], 0.7)
-            self.assertEqual(payload["discipline"]["budget_max"], 6)
+            self.assertEqual(payload["discipline"]["budget_max"], runtime.discipline.settings.max_signals_per_day)
             journal = runtime.ledger.list_engine_events(
                 10, dataset_id=runtime.dataset_id(), kinds=("journal",)
             )

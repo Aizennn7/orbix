@@ -112,13 +112,13 @@ class DisciplineSettings:
     sessions_error: str | None = None
     weekdays_only: bool = True
     open_quiet_minutes: int = 10
-    max_signals_per_day: int = 6
-    min_spacing_minutes: int = 20
-    max_daily_losses: int = 3
-    cooldown_after_losses: int = 2
-    cooldown_minutes: int = 30
-    context_min_samples: int = 20
-    context_min_win_rate: float = 0.45
+    max_signals_per_day: int = 200
+    min_spacing_minutes: int = 3
+    max_daily_losses: int = 100
+    cooldown_after_losses: int = 12
+    cooldown_minutes: int = 10
+    context_min_samples: int = 200
+    context_min_win_rate: float = 0.40
     max_open_trades: int = 1
 
     @classmethod
@@ -138,13 +138,13 @@ class DisciplineSettings:
             sessions_error=error,
             weekdays_only=_env_bool("ORBIX_WEEKDAYS_ONLY", True),
             open_quiet_minutes=_env_int("ORBIX_SESSION_QUIET_MINUTES", 10, 0, 180),
-            max_signals_per_day=_env_int("ORBIX_MAX_SIGNALS_PER_DAY", 6, 1, 100),
-            min_spacing_minutes=_env_int("ORBIX_MIN_SIGNAL_SPACING_MINUTES", 20, 1, 1440),
-            max_daily_losses=_env_int("ORBIX_MAX_DAILY_LOSSES", 3, 1, 100),
-            cooldown_after_losses=_env_int("ORBIX_COOLDOWN_AFTER_LOSSES", 2, 1, 20),
-            cooldown_minutes=_env_int("ORBIX_COOLDOWN_MINUTES", 30, 1, 1440),
-            context_min_samples=_env_int("ORBIX_CONTEXT_MIN_SAMPLES", 20, 5, 500),
-            context_min_win_rate=_env_float("ORBIX_CONTEXT_MIN_WIN_RATE", 0.45, 0.0, 0.9),
+            max_signals_per_day=_env_int("ORBIX_MAX_SIGNALS_PER_DAY", 200, 1, 1000),
+            min_spacing_minutes=_env_int("ORBIX_MIN_SIGNAL_SPACING_MINUTES", 3, 1, 1440),
+            max_daily_losses=_env_int("ORBIX_MAX_DAILY_LOSSES", 100, 1, 500),
+            cooldown_after_losses=_env_int("ORBIX_COOLDOWN_AFTER_LOSSES", 12, 1, 100),
+            cooldown_minutes=_env_int("ORBIX_COOLDOWN_MINUTES", 10, 1, 1440),
+            context_min_samples=_env_int("ORBIX_CONTEXT_MIN_SAMPLES", 200, 5, 1000),
+            context_min_win_rate=_env_float("ORBIX_CONTEXT_MIN_WIN_RATE", 0.40, 0.0, 0.9),
             max_open_trades=_env_int("ORBIX_MAX_OPEN_TRADES", 1, 1, 20),
         )
 

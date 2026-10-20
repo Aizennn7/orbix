@@ -135,11 +135,75 @@ class OrbixEngineTests(unittest.TestCase):
         abstain = decide("orbix_confluence", candle, close * 0.999, features, None)
         self.assertEqual(abstain.side, "NO SIGNAL")
 
+    def test_cadence_read_trades_only_with_a_minimum_edge_and_trend(self) -> None:
+        candle = self.candles[-1]
+        features = compute_features(self.candles)[-1]
+        features["ema_fast"] = 1.2
+        features["ema_slow"] = 1.1
+        buy = decide(
+            "orbix_cadence",
+            candle,
+            candle.close,
+            features,
+            0.53,
+            probability_calibrated=True,
+            uncertainty=0.02,
+        )
+        self.assertEqual(buy.side, "BUY")
+        self.assertIn("Cadence read", buy.reason)
+        shallow = decide(
+            "orbix_cadence",
+            candle,
+            candle.close,
+            features,
+            0.503,
+            probability_calibrated=True,
+            uncertainty=0.02,
+        )
+        self.assertEqual(shallow.side, "NO SIGNAL")
+        self.assertIn("below the 0.005 minimum", shallow.reason)
+        features["ema_fast"] = 1.0
+        features["ema_slow"] = 1.1
+        counter_trend = decide(
+            "orbix_cadence",
+            candle,
+            candle.close,
+            features,
+            0.53,
+            probability_calibrated=True,
+            uncertainty=0.02,
+        )
+        # The cadence mode does not veto a counter-trend read; it labels it and
+        # keeps the three-minute rhythm. The uncertainty gate is still absolute.
+        self.assertEqual(counter_trend.side, "BUY")
+        self.assertIn("against the short-term EMA", counter_trend.reason)
+        sell = decide(
+            "orbix_cadence",
+            candle,
+            candle.close,
+            features,
+            0.46,
+            probability_calibrated=True,
+            uncertainty=0.02,
+        )
+        self.assertEqual(sell.side, "SELL")
+        unstable = decide(
+            "orbix_cadence",
+            candle,
+            candle.close,
+            features,
+            0.46,
+            probability_calibrated=True,
+            uncertainty=0.25,
+        )
+        self.assertEqual(unstable.side, "NO SIGNAL")
+        self.assertIn("disagreement", unstable.reason)
+
     def test_strategy_catalog_has_30_candidates(self) -> None:
         self.assertEqual(len(STRATEGY_CATALOG), 30)
         payload = strategy_catalog_payload()
         self.assertEqual(len(payload["candidates"]), 30)
-        self.assertEqual(len(payload["executable"]), 5)
+        self.assertEqual(len(payload["executable"]), 6)
         statuses = {item["name"]: item["status"] for item in payload["candidates"]}
         self.assertEqual(statuses["Trend-filtered RSI pullback"], "prototype approximation")
         self.assertEqual(statuses["Bollinger bounce"], "prototype approximation")

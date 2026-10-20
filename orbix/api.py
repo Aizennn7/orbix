@@ -223,7 +223,7 @@ def trader(days: int = 7) -> dict:
         reviews = runtime.discipline.reviews(pair=pair, days=days, reference=reference)
         contexts = runtime.discipline.contexts(pair=pair)
         journal = runtime.ledger.list_engine_events(
-            max(1, min(200, days * 20)),
+            max(20, min(60, days * 10)),
             dataset_id=dataset_id,
             kinds=("journal",),
         )

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
+from unittest import mock
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -74,6 +76,16 @@ class DisciplineTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temp.cleanup()
+
+    def test_the_default_profile_is_a_three_minute_cadence(self) -> None:
+        with mock.patch.dict(os.environ, {}, clear=True):
+            settings = DisciplineSettings.from_env()
+        self.assertEqual(settings.min_spacing_minutes, 3)
+        self.assertEqual(settings.max_signals_per_day, 200)
+        self.assertEqual(settings.max_daily_losses, 100)
+        self.assertEqual(settings.cooldown_after_losses, 12)
+        self.assertEqual(settings.context_min_samples, 200)
+        self.assertAlmostEqual(settings.context_min_win_rate, 0.40)
 
     def test_asian_hour_is_outside_the_human_session(self) -> None:
         moment = datetime(2026, 10, 21, 3, 0, tzinfo=UTC)

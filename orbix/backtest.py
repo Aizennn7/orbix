@@ -47,7 +47,7 @@ def run_walk_forward_backtest(
     test_start = max(60, int(len(candles) * 0.60))
     model: OnlineLogisticModel | None = None
     ensemble: BootstrapEnsemble | None = None
-    uses_learned_model = strategy_id in {"ml_consensus", "orbix_confluence"}
+    uses_learned_model = strategy_id in {"ml_consensus", "orbix_confluence", "orbix_cadence"}
     if uses_learned_model:
         training = build_training_samples(candles, rows, horizon=horizon, end_index=test_start - 1)
         model = OnlineLogisticModel().fit(training)

@@ -57,7 +57,7 @@ class PredictionEngine:
                 )
                 decision_probability = prediction.probability_up
                 calibrated = prediction.calibrated
-            uses_model = strategy_id in {"ml_consensus", "orbix_confluence"}
+            uses_model = strategy_id in {"ml_consensus", "orbix_confluence", "orbix_cadence"}
             decision = decide(
                 strategy_id,
                 latest,

@@ -54,6 +54,13 @@ EXECUTABLE_STRATEGIES = [
         "prototype": True,
     },
     {
+        "id": "orbix_cadence",
+        "name": "Orbix Cadence Read",
+        "category": "high-frequency model read",
+        "description": "Higher-frequency mode for collecting a signal roughly every three minutes: the calibrated model's direction, a small minimum edge, EMA trend context, and the same uncertainty and flat-calibration vetoes. This is deliberately less selective than the 5/6 gate; frequency is not accuracy.",
+        "prototype": True,
+    },
+    {
         "id": "trend_pullback",
         "name": "Trend pullback",
         "category": "trend",
@@ -209,6 +216,39 @@ def decide(
                 probability_up,
             )
         return Decision("NO SIGNAL", "Model and trend filters do not agree strongly enough.", probability_up)
+
+    if strategy_id == "orbix_cadence":
+        if probability_up is None:
+            return Decision("NO SIGNAL", "The model is not ready; the cadence read waits.", None)
+        basis = "calibrated" if probability_calibrated else "raw"
+        # Calibration compresses scores toward 0.50, so the same selectivity
+        # needs a smaller number on a calibrated read than on a raw one. The
+        # bar is deliberately tiny: this mode is for a steady three-minute
+        # collection rhythm, not for a claim that every read has an edge.
+        minimum = 0.005 if probability_calibrated else 0.010
+        edge = float(probability_up) - 0.5
+        if abs(edge) < minimum:
+            return Decision(
+                "NO SIGNAL",
+                (
+                    f"Cadence read abstains: {basis} model edge {edge:+.3f} is below the "
+                    f"{minimum:.3f} minimum. A forced direction here would be a guess."
+                ),
+                probability_up,
+            )
+        side = "BUY" if edge > 0 else "SELL"
+        trend = "with" if (
+            ema_fast > ema_slow if side == "BUY" else ema_fast < ema_slow
+        ) else "against"
+        return Decision(
+            side,
+            (
+                f"Cadence read: {basis} model {probability_up:.2f} ({edge:+.2f} from 0.50), "
+                f"{trend} the short-term EMA trend. High-frequency collection mode: less "
+                "selective than the 5/6 gate; the estimate is not a promised win rate."
+            ),
+            probability_up,
+        )
 
     if strategy_id == "trend_pullback":
         bullish_reclaim = previous_close <= features["ema_fast_previous"] and close > ema_fast

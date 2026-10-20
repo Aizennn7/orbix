@@ -347,7 +347,7 @@ class AutomationService:
         self._telegram_edited_result_ids: list[str] = []
         self._telegram_last_skip_reason: str | None = None
         self._auto_signal_history: list[dict[str, Any]] = []
-        requested_strategy = os.getenv("ORBIX_AUTO_STRATEGY", "orbix_confluence").strip()
+        requested_strategy = os.getenv("ORBIX_AUTO_STRATEGY", "orbix_cadence").strip()
         valid_strategies = {item["id"] for item in EXECUTABLE_STRATEGIES}
         self._strategy_config_error = None
         if requested_strategy not in valid_strategies:
