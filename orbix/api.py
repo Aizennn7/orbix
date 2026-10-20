@@ -90,7 +90,7 @@ app = FastAPI(
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
 
 
-PUBLIC_PATHS = {"/login", "/api/auth/status", "/favicon.ico"}
+PUBLIC_PATHS = {"/login", "/healthz", "/api/auth/status", "/favicon.ico"}
 
 
 def _cookie_secure(request: Request) -> bool:
@@ -370,6 +370,16 @@ async def _with_streamed_csv(request: Request, max_bytes: int, processor: Callab
 @app.get("/", response_class=HTMLResponse)
 def index() -> HTMLResponse:
     return HTMLResponse((WEB_DIR / "index.html").read_text(encoding="utf-8"))
+
+
+@app.get("/healthz")
+def healthz() -> dict:
+    """Unauthenticated liveness probe for container and platform checks.
+
+    Deliberately returns nothing about the feed, the model, or the trading
+    state; that detail stays behind authentication on /api/health.
+    """
+    return {"status": "ok"}
 
 
 @app.get("/api/health")
