@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import json
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 from .calibration import (
     accuracy,
@@ -315,6 +315,8 @@ class SelfLearningEngine:
     max_degradation: float = 0.02
     recalibrate_every: int = 50
     tracker: PrequentialTracker = field(default_factory=PrequentialTracker)
+    shadow_tracker: PrequentialTracker = field(default_factory=PrequentialTracker)
+    shadow_observations: int = 0
     drift: DriftMonitor = field(default_factory=DriftMonitor)
     replay: deque = field(default_factory=deque)
     accepted_updates: int = 0
@@ -330,9 +332,17 @@ class SelfLearningEngine:
     updates_since_calibration: int = 0
     version: str | None = None
     events: deque = field(default_factory=lambda: deque(maxlen=25))
+    event_sink: Callable[[dict], None] | None = None
 
     def _event(self, kind: str, detail: str) -> None:
-        self.events.append({"at": _now().isoformat(), "kind": kind, "detail": detail})
+        event = {"at": _now().isoformat(), "kind": kind, "detail": detail}
+        self.events.append(event)
+        if self.event_sink is not None:
+            try:
+                self.event_sink(event)
+            except Exception:
+                # Audit persistence must never break learning.
+                pass
 
     def observe(
         self,
@@ -343,6 +353,7 @@ class SelfLearningEngine:
         *,
         issued_probability: float | None = None,
         timestamp: datetime | None = None,
+        shadow: bool = False,
     ) -> dict:
         if label not in (0, 1):
             raise ValueError("Learning labels must be 0 (down) or 1 (up)")
@@ -359,13 +370,21 @@ class SelfLearningEngine:
         )
         correct_before = (prediction_before >= 0.5) == bool(label)
         issued_correct = (issued >= 0.5) == bool(label)
-        self.tracker.observe(issued, int(label), correct=issued_correct, timestamp=timestamp)
+        if shadow:
+            # Shadow reads keep the replay and calibration honest without
+            # polluting the live prequential record or the drift monitor.
+            self.shadow_tracker.observe(issued, int(label), correct=issued_correct, timestamp=timestamp)
+            self.shadow_observations += 1
+        else:
+            self.tracker.observe(issued, int(label), correct=issued_correct, timestamp=timestamp)
         self.replay.append((dict(features), int(label)))
         while len(self.replay) > self.replay_capacity:
             self.replay.popleft()
 
         drift_state = self.drift.evaluate(self.tracker.errors(), now=timestamp)
-        warming_up = self.tracker.total_seen < self.min_samples
+        warming_up = (
+            self.shadow_tracker.total_seen if shadow else self.tracker.total_seen
+        ) < self.min_samples
 
         before_loss = self._replay_log_loss(model)
         snapshot = model.snapshot()
@@ -384,7 +403,8 @@ class SelfLearningEngine:
             accepted = False
             self.rejected_updates += 1
             self.last_rejection_reason = (
-                f"Update reverted: replay log loss rose from {before_loss:.4f} to {after_loss:.4f}."
+                f"{'Shadow ' if shadow else ''}update reverted: replay log loss rose "
+                f"from {before_loss:.4f} to {after_loss:.4f}."
             )
             reason = self.last_rejection_reason
             self._event("update_rejected", reason)
@@ -394,6 +414,7 @@ class SelfLearningEngine:
 
         self.last_update_at = (timestamp or _now()).isoformat()
         return {
+            "shadow": shadow,
             "learned": accepted,
             "evaluated": True,
             "warming_up": warming_up,
@@ -488,6 +509,8 @@ class SelfLearningEngine:
             "version": self.version,
             "tracker": self.tracker.summary(),
             "tracker_recent": self.tracker.summary(window=100),
+            "shadow_tracker": self.shadow_tracker.summary(),
+            "shadow_observations": self.shadow_observations,
             "drift": self.drift.peek(self.tracker.errors()),
             "counts": {
                 "accepted_updates": self.accepted_updates,

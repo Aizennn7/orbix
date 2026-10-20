@@ -95,3 +95,63 @@ class PredictionEngine:
             contributions=tuple(prediction.contributions) if prediction else (),
         )
         return signal, fitted_model, current_features
+
+    def raw_shadow(
+        self,
+        candles: list[Candle],
+        pair: str,
+        strategy_id: str = "ml_consensus",
+        *,
+        model: OnlineLogisticModel | None = None,
+        horizon: int = 1,
+        buy_threshold: float = 0.57,
+        sell_threshold: float = 0.43,
+        production_probability: float | None = None,
+    ) -> tuple[dict, dict[str, float]] | None:
+        """Counterfactual raw read for a bar the flat-calibration gate skipped.
+
+        This is learning-only. It deliberately uses the uncalibrated score and
+        ignores the ensemble/calibration gates, so the engine can keep
+        collecting outcomes while a flat map blocks live signals. It is never
+        sent, stored as a paper signal, or counted in the live record.
+        """
+        if model is None or not model.trained or len(candles) < 40:
+            return None
+        rows = compute_features(candles)
+        index = len(candles) - 1
+        features = rows[index]
+        if features is None:
+            return None
+        latest = candles[index]
+        raw = model.predict_up(features)
+        decision = decide(
+            strategy_id,
+            latest,
+            candles[index - 1].close,
+            features,
+            raw,
+            buy_threshold=buy_threshold,
+            sell_threshold=sell_threshold,
+            probability_calibrated=False,
+            uncertainty=None,
+            calibration_flat=False,
+        )
+        if decision.side == "NO SIGNAL":
+            return None
+        entry_time = latest.timestamp + timedelta(minutes=1)
+        shadow = {
+            "shadow_id": uuid.uuid4().hex,
+            "pair": pair,
+            "strategy": strategy_id,
+            "side": decision.side,
+            "entry_price": latest.close,
+            "entry_time": entry_time.isoformat(),
+            "expires_at": (entry_time + timedelta(minutes=horizon)).isoformat(),
+            "probability_up": float(raw),
+            "probability_calibrated": production_probability,
+            "reason": (
+                f"Shadow read (not traded): raw score {raw:.3f}. "
+                f"{decision.reason}"
+            ),
+        }
+        return shadow, features

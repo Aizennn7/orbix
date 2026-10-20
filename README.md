@@ -60,10 +60,33 @@ Liquidity ordering in the Future page uses the BIS Triennial Central Bank Survey
 - **Guarded online updates.** After every resolved outcome, an update is kept only if replay log loss on the last 200 stored feature rows does not degrade by more than `ORBIX_MAX_UPDATE_DEGRADATION` (default 2%). The replay guard starts after `max(20, ORBIX_MIN_LEARNING_SAMPLES)` stored outcomes (default 30); before that, each outcome updates the running model without a rollback check. When the guard fails the weights are restored and the rejection is counted and shown.
 - **Drift and decay.** A two-window error monitor compares the last 40 resolved predictions with the preceding 40. A rise of more than 10 percentage points is labelled `drift`; a fall is `improving`. This is a signal to inspect, not proof of a regime change.
 - **Calibration refit.** The isotonic mapping is refitted from stored resolved outcomes every `ORBIX_RECALIBRATE_EVERY` accepted updates (default 50) and whenever an existing mapping has drifted. With 140 or more stored outcomes the fit uses the older 70% and must not worsen either Brier score or expected calibration error on the newer 30%; otherwise the previous mapping is kept. A fit that collapses to a single level is stored and reported as flat, and the gate abstains until the score regains rank structure. Demo outcomes are never used.
+- **Counterfactual (shadow) reads.** A flat calibration map blocks every model signal, which stops the outcome stream the map needs to recover. On imported data, when a model strategy hits exactly that `flat_calibration` abstention, Orbix stores the raw, uncalibrated read in `shadow_signals`, resolves it at the same expiry, and feeds the label into the model, replay guard, and calibration. Shadow rows are labelled separately: they never enter paper signals, win rate, Telegram delivery, per-strategy records, or the live drift monitor. `/api/model` and `/api/learning` expose shadow totals, resolved/learned counts, and a shadow-only accuracy/Brier tracker. They are counterfactual evidence, not trades.
+
 - **Promotion and rollback.** Retraining fits a challenger on the older 85% of imported candles and validates it on the most recent 15%. The challenger replaces the champion only if held-out log loss improves and Brier score does not worsen. Each promoted snapshot is versioned under `data/models/`; the last 12 are kept. `POST /api/model/rollback` restores the previous snapshot. The comparison is deliberately conservative because the champion may already have learned from some recent bars online.
 - **Scheduled maintenance.** The background loop checks calibration and drift every 15 minutes while imported data is active. An automatic retrain is attempted only after drift plus at least 100 newly resolved outcomes, and still passes through the same validation gate.
 - **Live preflight.** `GET /api/preflight` checks the market-provider key, active dataset, bar freshness, calendar connection, news guard, scheduler switch, champion model, calibration state, and optional Telegram delivery. It also reports how many resolved outcomes are still needed before online updates and calibration begin. Readiness is a configuration check, not a performance forecast; on synthetic demo data it is expected to report blockers.
 - **No fabricated accuracy.** These metrics describe recorded paper outcomes. They do not include spread, payout, or execution, and they cannot establish a future win rate.
+
+## Walk-forward study
+
+`orbix.study` is a separate research harness. It walks one series chronologically, refits the model on a rolling window of matured labels, recalibrates from the same 200-outcome replay the runtime uses, and scores every variant on identical entry/exit prices. It reports the production-gated path, a raw counterfactual read, the pure raw score, and six baselines, with a Wilson interval, net pips after an explicit spread, and a t-statistic. The verdict refuses a tradeable-edge claim unless the interval clears break-even, the cost-adjusted mean is positive with t ≥ 2, and the model beats the best baseline.
+
+```bash
+python -m orbix.study --csv /path/to/EURUSD_M1.csv --tz-offset 5 \
+  --horizon 5 --spread-pips 1.0 --payout 0.80 --out data/studies/eurusd.json
+```
+
+A local run on third-party HistData-derived 2024 EUR/USD M1 data (372,379 rows; not committed because its licence is unresolved), with a 40,000-bar warm-up, two-day refits, a five-minute horizon, 1.0 pip spread, and an 80% payout assumption:
+
+| Variant | Signals | Win rate | 95% low | Net pips/signal | Units |
+|---|---:|---:|---:|---:|---:|
+| Production gate | 2,798 | 49.4% | 47.5% | −1.031 | −299.8 |
+| Raw counterfactual | 1,560 | 47.5% | 45.0% | −1.061 | −219.8 |
+| Pure raw score | 87,410 | 51.2% | 50.8% | −0.988 | −6,682.0 |
+| Always up | 332,332 | 50.5% | 50.3% | −1.006 | −29,143.4 |
+| RSI reversal (best baseline) | 32,451 | 52.4% | 51.8% | −0.910 | −1,776.6 |
+
+Verdict: **no tradeable edge after costs**. Break-even at an 80% payout is 55.56%; nothing in the study reached it, and the pure score's gross edge was about +0.012 pips before the spread. The model abstained or was flat for most bars (2.6% flat) and the gate allowed 0.84% coverage. This is one year, one pair, and one cost assumption; a future run can differ, which is exactly why the harness reports intervals instead of a headline accuracy.
 
 ## Data, tests, and API
 

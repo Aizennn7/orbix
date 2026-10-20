@@ -1638,6 +1638,11 @@ function renderModelCard(data) {
   $("#modelLearningCounts").textContent = counts
     ? `This session: accepted updates ${Number(counts.accepted_updates || 0).toLocaleString()} · rejected ${Number(counts.rejected_updates || 0).toLocaleString()} · recalibrations ${Number(counts.recalibrations || 0).toLocaleString()} · promotions ${Number(counts.promotions || 0).toLocaleString()} · rollbacks ${Number(counts.rollbacks || 0).toLocaleString()}.`
     : "";
+  const shadow = data.shadow || {};
+  const shadowTracker = shadow.tracker || {};
+  $("#modelShadow").textContent = shadow.total
+    ? `Shadow learning: ${Number(shadow.resolved || 0).toLocaleString()} resolved, ${Number(shadow.learned || 0).toLocaleString()} updates kept${shadowTracker.accuracy == null ? "" : `, ${(Number(shadowTracker.accuracy) * 100).toFixed(1)}% direction accuracy`}${shadowTracker.brier == null ? "" : `, Brier ${Number(shadowTracker.brier).toFixed(3)}`}. Counterfactual only — never traded or delivered.`
+    : "";
 
   const prequential = data.prequential;
   const recordText = prequential?.samples

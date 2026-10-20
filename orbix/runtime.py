@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import threading
 
+from .abstentions import classify_reason
 from .calibration import reliability_bins
 from .candle_store import CandleStore, TAIL_ROWS
 from .domain import Candle, parse_datetime
@@ -186,6 +187,9 @@ class Runtime:
             outcomes = self._resolve_matured_outcomes()
             result["auto_resolved"] = outcomes
             result["automatic_model_updates"] = sum(1 for outcome in outcomes if outcome["learned"])
+            result["shadow_model_updates"] = sum(
+                1 for outcome in outcomes if outcome.get("kind") == "shadow" and outcome["learned"]
+            )
             return result
 
     def training_candles(self, limit: int = MODEL_TRAINING_WINDOW) -> list[Candle]:
@@ -264,14 +268,28 @@ class Runtime:
         if engine is not None:
             return engine
         registry = self._registry(pair)
+        dataset_id = self.dataset_id()
+
+        def persist_event(event: dict) -> None:
+            self.ledger.record_engine_event(
+                pair,
+                dataset_id,
+                str(event.get("kind", "event")),
+                str(event.get("detail", "")),
+                at=event.get("at"),
+            )
+
         engine = SelfLearningEngine(
             pair=pair,
-            dataset_id=self.dataset_id(),
+            dataset_id=dataset_id,
             registry=registry,
             min_samples=self.settings["min_learning_samples"],
             max_degradation=self.settings["max_degradation"],
             recalibrate_every=self.settings["recalibrate_every"],
+            event_sink=persist_event,
         )
+        for event in self.ledger.list_engine_events(25, dataset_id=dataset_id):
+            engine.events.append(event)
         for row in self.ledger.learning_history(600):
             try:
                 moment = parse_datetime(row["created_at"]) if row.get("created_at") else None
@@ -288,6 +306,18 @@ class Runtime:
         engine.updates_since_calibration = engine.accepted_updates
         for row in self.ledger.learning_replay(engine.replay_capacity):
             engine.replay.append((row["features"], int(row["label"])))
+        for row in self.ledger.shadow_history(600):
+            try:
+                moment = parse_datetime(row["created_at"]) if row.get("created_at") else None
+            except (ValueError, TypeError):
+                moment = None
+            engine.shadow_tracker.observe(
+                row.get("probability_up"),
+                row.get("label"),
+                correct=None if row.get("correct") is None else bool(row["correct"]),
+                timestamp=moment,
+            )
+        engine.shadow_observations = engine.shadow_tracker.total_seen
         engine.version = registry.active_version()
         self._learning[key] = engine
         self._last_promotion_seen.setdefault(key, engine.tracker.total_seen)
@@ -306,6 +336,8 @@ class Runtime:
                     probability_up=None,
                     correct=None,
                     model_updated=False,
+                    kind="paper",
+                    features=features,
                 )
                 return {"learned": False, "reason": "No directional label was available (flat/tied outcome)."}
             if record["source"] != "IMPORTED CSV":
@@ -322,6 +354,8 @@ class Runtime:
                     probability_up=None,
                     correct=None,
                     model_updated=False,
+                    kind="paper",
+                    features=features,
                 )
                 return {"learned": False, "reason": str(exc)}
 
@@ -340,6 +374,8 @@ class Runtime:
                 probability_up=result["issued_probability"],
                 correct=result["issued_correct"],
                 model_updated=bool(result["accepted"]),
+                kind="paper",
+                features=features,
             )
             calibration = None
             if model.calibrator.fitted:
@@ -361,6 +397,74 @@ class Runtime:
                 "drift": result["drift"],
                 "calibration": calibration,
             }
+
+    def _learn_shadow(self, record: dict) -> dict:
+        """Feed one resolved counterfactual read into the model and calibration.
+
+        Shadow rows never count as paper signals, never notify Telegram, and are
+        excluded from the live prequential tracker and drift monitor.
+        """
+        features = record.get("features") or {}
+        label = record.get("direction_label")
+        if label is None or not features:
+            self.ledger.record_learning_event(
+                signal_id=record["shadow_id"],
+                pair=record["pair"],
+                dataset_id=record["dataset_id"],
+                label=None,
+                probability_up=None,
+                correct=None,
+                model_updated=False,
+                kind="shadow",
+                features=features,
+            )
+            self.ledger.mark_shadow_learned(record["shadow_id"], False)
+            return {"learned": False, "reason": "No directional label was available (flat/tied outcome)."}
+        try:
+            model = self.get_or_train_model(record["pair"])
+        except ValueError as exc:
+            self.ledger.mark_shadow_learned(record["shadow_id"], False)
+            return {"learned": False, "reason": str(exc)}
+
+        engine = self.learning_engine(record["pair"])
+        result = engine.observe(
+            model,
+            features,
+            int(label),
+            issued_probability=record.get("probability_up"),
+            shadow=True,
+        )
+        self.ledger.record_learning_event(
+            signal_id=record["shadow_id"],
+            pair=record["pair"],
+            dataset_id=record["dataset_id"],
+            label=int(label),
+            probability_up=result["issued_probability"],
+            correct=result["issued_correct"],
+            model_updated=bool(result["accepted"]),
+            kind="shadow",
+            features=features,
+        )
+        self.ledger.mark_shadow_learned(record["shadow_id"], bool(result["accepted"]))
+
+        calibration = None
+        if model.calibrator.fitted:
+            if engine.should_recalibrate():
+                calibration = engine.recalibrate(model)
+        elif len(engine.replay) >= 60:
+            calibration = engine.recalibrate(model, force=True)
+        if result["accepted"] or (calibration is not None and calibration.get("accepted")):
+            self._ensembles.pop(record["pair"], None)
+            self._save_champion(record["pair"], model)
+            self.models[record["pair"]] = model
+        return {
+            "learned": bool(result["accepted"]),
+            "accepted": bool(result["accepted"]),
+            "reason": result["reason"],
+            "training_samples": model.training_samples,
+            "calibration": calibration,
+            "shadow": True,
+        }
 
     # ------------------------------------------------------------------ signals
     def generate_signal(
@@ -407,6 +511,7 @@ class Runtime:
             if learning_model is not None and self.source == "IMPORTED CSV":
                 learning_model.save(self.model_path(pair))
             active_dataset = self.dataset_id()
+            shadow_note = None
             if signal.side == "NO SIGNAL":
                 # Abstentions are logged so restraint can be measured, but they
                 # never enter the paper signal or learning tables.
@@ -420,9 +525,37 @@ class Runtime:
                     dataset_id=active_dataset,
                     now=signal.generated_at,
                 )
+                # A flat calibration map blocks every live model signal. Without
+                # a counterfactual read the outcome stream stops, so the map can
+                # never recover. Record the raw read for learning only.
+                if (
+                    self.source == "IMPORTED CSV"
+                    and learning_model is not None
+                    and strategy_id in {"ml_consensus", "orbix_confluence"}
+                    and classify_reason(signal.reason) == "flat_calibration"
+                ):
+                    preview = self.engine.raw_shadow(
+                        self.candles,
+                        pair,
+                        strategy_id,
+                        model=learning_model,
+                        horizon=horizon,
+                        production_probability=signal.probability_up,
+                    )
+                    if preview is not None:
+                        shadow, shadow_features = preview
+                        recorded = self.ledger.record_shadow(shadow, shadow_features, active_dataset)
+                        shadow_note = {
+                            "recorded": recorded,
+                            "side": shadow["side"],
+                            "probability_up": shadow["probability_up"],
+                            "entry_time": shadow["entry_time"],
+                        }
             else:
                 self.ledger.record(signal, features, dataset_id=active_dataset)
-            return signal.to_dict()
+            payload = signal.to_dict()
+            payload["shadow"] = shadow_note
+            return payload
 
     # ------------------------------------------------------- promotion/rollback
     def _holdout_metrics(self, model: OnlineLogisticModel, rows) -> dict:
@@ -597,6 +730,17 @@ class Runtime:
             return result
 
     # ------------------------------------------------------------------ status
+    def _shadow_block(self, pair: str, engine: SelfLearningEngine | None) -> dict:
+        dataset_id = self.dataset_id()
+        block = self.ledger.shadow_summary(dataset_id=dataset_id) if dataset_id else self.ledger.shadow_summary()
+        if engine is not None:
+            block["tracker"] = engine.shadow_tracker.summary()
+        block["note"] = (
+            "Counterfactual raw reads recorded while the flat-calibration gate blocked live signals. "
+            "They feed the model and calibration only; they are not paper trades or delivery candidates."
+        )
+        return block
+
     def model_card(self, pair: str) -> dict:
         pair = pair.upper().strip()
         with self.lock:
@@ -672,6 +816,7 @@ class Runtime:
                 ),
                 "learning_events": learning_status["events"] if learning_status else [],
                 "learning_counts": learning_status["counts"] if learning_status else None,
+                "shadow": self._shadow_block(pair, engine),
                 "versions": registry.list_versions(limit=8) if registry else [],
                 "active_version": registry.active_version() if registry else None,
                 "by_strategy": self.ledger.learning_by_strategy(dataset_id=self.dataset_id()),
@@ -727,6 +872,7 @@ class Runtime:
             "calibration_report": model.calibration_report if model else None,
             "drift": engine.drift.peek(engine.tracker.errors()) if engine else {"state": "untracked"},
             "learning_engine": engine.status() if engine else None,
+            "shadow": self._shadow_block(self.pair, engine),
             "versions": registry.list_versions(limit=8) if registry else [],
             "active_version": registry.active_version() if registry else None,
             "by_strategy": self.ledger.learning_by_strategy(),
@@ -761,6 +907,29 @@ class Runtime:
             learning = self.learn_from_record(resolved)
             outcomes.append({
                 "signal_id": pending["signal_id"],
+                "kind": "paper",
+                "outcome": resolved["outcome"],
+                "learned": learning["learned"],
+                "reason": learning.get("reason"),
+                "training_samples": learning.get("training_samples"),
+            })
+        # Resolve counterfactual reads even when no live signal was allowed.
+        for pending in self.ledger.list_pending_shadows(pair=self.pair, dataset_id=self._dataset_id):
+            expires_at = parse_datetime(pending["expires_at"])
+            target_timestamp = expires_at - timedelta(minutes=1)
+            target = candle_by_timestamp.get(target_timestamp)
+            if target is None:
+                target = self.candle_store.get_candle(self._dataset_id, target_timestamp)
+            if target is None:
+                continue
+            try:
+                resolved = self.ledger.resolve_shadow(pending["shadow_id"], target.close)
+            except ValueError:
+                continue
+            learning = self._learn_shadow(resolved)
+            outcomes.append({
+                "signal_id": pending["shadow_id"],
+                "kind": "shadow",
                 "outcome": resolved["outcome"],
                 "learned": learning["learned"],
                 "reason": learning.get("reason"),

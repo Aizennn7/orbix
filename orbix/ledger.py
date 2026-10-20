@@ -86,6 +86,50 @@ class PaperLedger:
                     created_at TEXT NOT NULL
                 )"""
             )
+            learning_columns = {row["name"] for row in connection.execute("PRAGMA table_info(learning_events)")}
+            if "kind" not in learning_columns:
+                connection.execute("ALTER TABLE learning_events ADD COLUMN kind TEXT NOT NULL DEFAULT 'paper'")
+            if "features_json" not in learning_columns:
+                connection.execute("ALTER TABLE learning_events ADD COLUMN features_json TEXT NOT NULL DEFAULT ''")
+            connection.execute(
+                """CREATE TABLE IF NOT EXISTS shadow_signals (
+                    shadow_id TEXT PRIMARY KEY,
+                    pair TEXT NOT NULL,
+                    strategy TEXT NOT NULL,
+                    side TEXT NOT NULL,
+                    entry_price REAL NOT NULL,
+                    entry_time TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    probability_up REAL NOT NULL,
+                    probability_calibrated REAL,
+                    features_json TEXT NOT NULL,
+                    dataset_id TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'PENDING',
+                    exit_price REAL,
+                    outcome TEXT,
+                    learned INTEGER NOT NULL DEFAULT 0,
+                    reason TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    resolved_at TEXT,
+                    UNIQUE (pair, strategy, dataset_id, entry_time)
+                )"""
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS shadow_pending ON shadow_signals (status, pair, dataset_id)"
+            )
+            connection.execute(
+                """CREATE TABLE IF NOT EXISTS engine_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    pair TEXT NOT NULL,
+                    dataset_id TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    detail TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )"""
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS engine_events_created ON engine_events (created_at)"
+            )
 
     def record(self, signal, features: dict[str, float] | None, dataset_id: str = "") -> None:
         if signal.side == "NO SIGNAL":
@@ -367,12 +411,16 @@ class PaperLedger:
         probability_up: float | None,
         correct: bool | None,
         model_updated: bool,
+        *,
+        kind: str = "paper",
+        features: dict[str, float] | None = None,
     ) -> None:
         with self._connect() as connection:
             connection.execute(
                 """INSERT OR IGNORE INTO learning_events
-                   (signal_id, pair, dataset_id, label, probability_up, correct, model_updated, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (signal_id, pair, dataset_id, label, probability_up, correct, model_updated,
+                    created_at, kind, features_json)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     signal_id,
                     pair,
@@ -382,6 +430,8 @@ class PaperLedger:
                     None if correct is None else int(correct),
                     int(model_updated),
                     datetime.now(timezone.utc).isoformat(),
+                    kind,
+                    json.dumps(features or {}),
                 ),
             )
 
@@ -391,8 +441,14 @@ class PaperLedger:
                 """SELECT COUNT(*), COALESCE(SUM(model_updated), 0),
                           AVG(CASE WHEN model_updated = 1 THEN correct END), MAX(created_at),
                           COALESCE(SUM(CASE WHEN model_updated = 1 AND correct = 1 THEN 1 ELSE 0 END), 0),
-                          COALESCE(SUM(CASE WHEN model_updated = 1 AND correct IS NOT NULL THEN 1 ELSE 0 END), 0)
-                   FROM learning_events"""
+                          COALESCE(SUM(CASE WHEN model_updated = 1 AND correct IS NOT NULL THEN 1 ELSE 0 END), 0),
+                          COALESCE(SUM(CASE WHEN kind = 'shadow' AND label IS NOT NULL THEN 1 ELSE 0 END), 0),
+                          COALESCE(SUM(CASE WHEN kind = 'shadow' AND model_updated = 1 THEN 1 ELSE 0 END), 0)
+                   FROM learning_events WHERE kind = 'paper'"""
+            ).fetchone()
+            shadow_row = connection.execute(
+                """SELECT COUNT(*), COALESCE(SUM(model_updated), 0)
+                   FROM learning_events WHERE kind = 'shadow'"""
             ).fetchone()
         correct = int(row[4])
         evaluated = int(row[5])
@@ -404,6 +460,8 @@ class PaperLedger:
             "prequential_evaluated_predictions": evaluated,
             "prequential_accuracy_ci95": wilson_interval(correct, evaluated),
             "last_update": row[3],
+            "shadow_resolved": int(shadow_row[0]),
+            "shadow_learned": int(shadow_row[1]),
         }
 
     def learning_history(self, limit: int = 600) -> list[dict]:
@@ -411,7 +469,18 @@ class PaperLedger:
         with self._connect() as connection:
             rows = connection.execute(
                 """SELECT probability_up, label, correct, model_updated, created_at FROM learning_events
-                   WHERE probability_up IS NOT NULL AND label IN (0, 1)
+                   WHERE kind = 'paper' AND probability_up IS NOT NULL AND label IN (0, 1)
+                   ORDER BY created_at DESC LIMIT ?""",
+                (max(1, int(limit)),),
+            ).fetchall()
+        return [dict(row) for row in reversed(rows)]
+
+    def shadow_history(self, limit: int = 600) -> list[dict]:
+        """Shadow predictions in chronological order, for a separate tracker."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                """SELECT probability_up, label, correct, created_at FROM learning_events
+                   WHERE kind = 'shadow' AND probability_up IS NOT NULL AND label IN (0, 1)
                    ORDER BY created_at DESC LIMIT ?""",
                 (max(1, int(limit)),),
             ).fetchall()
@@ -421,9 +490,11 @@ class PaperLedger:
         """Stored feature rows and labels for guarded replay checks."""
         with self._connect() as connection:
             rows = connection.execute(
-                """SELECT le.label, le.probability_up, s.features_json
-                   FROM learning_events le JOIN signals s ON s.signal_id = le.signal_id
-                   WHERE le.label IN (0, 1) AND s.features_json NOT IN ('', '{}')
+                """SELECT le.label, le.probability_up,
+                          COALESCE(NULLIF(le.features_json, ''), s.features_json) AS features_json
+                   FROM learning_events le LEFT JOIN signals s ON s.signal_id = le.signal_id
+                   WHERE le.label IN (0, 1)
+                     AND COALESCE(NULLIF(le.features_json, ''), s.features_json) NOT IN ('', '{}')
                    ORDER BY le.created_at DESC LIMIT ?""",
                 (max(1, int(limit)),),
             ).fetchall()
@@ -440,7 +511,7 @@ class PaperLedger:
 
     def learning_by_strategy(self, dataset_id: str | None = None) -> list[dict]:
         """Per-strategy prediction record, joined through the stored signal."""
-        signal_filter = " WHERE s.dataset_id = ?" if dataset_id else ""
+        dataset_clause = " AND s.dataset_id = ?" if dataset_id else ""
         outcome_filter = " WHERE dataset_id = ? AND status = 'RESOLVED'" if dataset_id else " WHERE status = 'RESOLVED'"
         parameters = (dataset_id,) if dataset_id else ()
         with self._connect() as connection:
@@ -450,7 +521,8 @@ class PaperLedger:
                           COALESCE(SUM(CASE WHEN le.correct = 1 THEN 1 ELSE 0 END), 0) AS correct,
                           COALESCE(SUM(le.model_updated), 0) AS updates,
                           AVG(CASE WHEN le.correct IS NOT NULL THEN le.probability_up END) AS mean_probability
-                   FROM learning_events le JOIN signals s ON s.signal_id = le.signal_id{signal_filter}
+                   FROM learning_events le JOIN signals s ON s.signal_id = le.signal_id
+                   WHERE le.kind = 'paper'{dataset_clause}
                    GROUP BY s.strategy""",
                 parameters,
             ).fetchall()
@@ -511,3 +583,158 @@ class PaperLedger:
         updated["features"] = json.loads(updated.pop("features_json"))
         updated["direction_label"] = direction_label
         return updated
+
+    # ------------------------------------------------------------------ shadow
+    def record_shadow(
+        self,
+        shadow: dict,
+        features: dict[str, float] | None,
+        dataset_id: str,
+    ) -> bool:
+        """Store a model read that was not traded, for learning only."""
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """INSERT OR IGNORE INTO shadow_signals
+                   (shadow_id, pair, strategy, side, entry_price, entry_time, expires_at,
+                    probability_up, probability_calibrated, features_json, dataset_id, reason, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    shadow["shadow_id"],
+                    shadow["pair"],
+                    shadow["strategy"],
+                    shadow["side"],
+                    shadow["entry_price"],
+                    shadow["entry_time"],
+                    shadow["expires_at"],
+                    shadow["probability_up"],
+                    shadow.get("probability_calibrated"),
+                    json.dumps(features or {}),
+                    dataset_id,
+                    shadow.get("reason", ""),
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+            return cursor.rowcount > 0
+
+    def has_shadow_for_time(self, pair: str, strategy: str, dataset_id: str, entry_time: str) -> bool:
+        with self._connect() as connection:
+            row = connection.execute(
+                """SELECT 1 FROM shadow_signals
+                   WHERE pair = ? AND strategy = ? AND dataset_id = ? AND entry_time = ? LIMIT 1""",
+                (pair, strategy, dataset_id, entry_time),
+            ).fetchone()
+        return row is not None
+
+    def list_pending_shadows(self, pair: str, dataset_id: str) -> list[dict]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """SELECT * FROM shadow_signals
+                   WHERE status = 'PENDING' AND pair = ? AND dataset_id = ?
+                   ORDER BY expires_at, created_at""",
+                (pair, dataset_id),
+            ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["features"] = json.loads(item.pop("features_json"))
+            result.append(item)
+        return result
+
+    def resolve_shadow(self, shadow_id: str, exit_price: float) -> dict:
+        if exit_price <= 0:
+            raise ValueError("Exit price must be greater than zero")
+        with self._connect() as connection:
+            row = connection.execute("SELECT * FROM shadow_signals WHERE shadow_id = ?", (shadow_id,)).fetchone()
+            if row is None:
+                raise ValueError("Shadow read was not found")
+            if row["status"] != "PENDING":
+                raise ValueError("Shadow read has already been resolved")
+            expiry = datetime.fromisoformat(row["expires_at"])
+            if expiry.tzinfo is None:
+                expiry = expiry.replace(tzinfo=timezone.utc)
+            if expiry > datetime.now(timezone.utc):
+                raise ValueError("Shadow read has not reached its expiry time yet")
+            entry = float(row["entry_price"])
+            side = row["side"]
+            if exit_price == entry:
+                direction_label = None
+                outcome = "TIE"
+            else:
+                direction_label = int(exit_price > entry)
+                won = (side == "BUY" and direction_label == 1) or (side == "SELL" and direction_label == 0)
+                outcome = "WIN" if won else "LOSS"
+            connection.execute(
+                """UPDATE shadow_signals
+                   SET status = 'RESOLVED', exit_price = ?, outcome = ?, resolved_at = ?
+                   WHERE shadow_id = ?""",
+                (exit_price, outcome, datetime.now(timezone.utc).isoformat(), shadow_id),
+            )
+            updated = dict(connection.execute(
+                "SELECT * FROM shadow_signals WHERE shadow_id = ?", (shadow_id,)
+            ).fetchone())
+        updated["features"] = json.loads(updated.pop("features_json"))
+        updated["direction_label"] = direction_label
+        return updated
+
+    def mark_shadow_learned(self, shadow_id: str, learned: bool) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE shadow_signals SET learned = ? WHERE shadow_id = ?",
+                (int(bool(learned)), shadow_id),
+            )
+
+    def shadow_summary(self, dataset_id: str | None = None) -> dict:
+        clause = " WHERE dataset_id = ?" if dataset_id else ""
+        parameters = (dataset_id,) if dataset_id else ()
+        with self._connect() as connection:
+            row = connection.execute(
+                f"""SELECT COUNT(*),
+                           COALESCE(SUM(CASE WHEN status = 'RESOLVED' THEN 1 ELSE 0 END), 0),
+                           COALESCE(SUM(CASE WHEN status = 'PENDING' THEN 1 ELSE 0 END), 0),
+                           COALESCE(SUM(learned), 0),
+                           COALESCE(SUM(CASE WHEN outcome = 'WIN' THEN 1 ELSE 0 END), 0),
+                           COALESCE(SUM(CASE WHEN outcome = 'LOSS' THEN 1 ELSE 0 END), 0),
+                           COALESCE(SUM(CASE WHEN outcome = 'TIE' THEN 1 ELSE 0 END), 0)
+                   FROM shadow_signals{clause}""",
+                parameters,
+            ).fetchone()
+        resolved, wins, losses = int(row[1]), int(row[4]), int(row[5])
+        decisive = wins + losses
+        return {
+            "total": int(row[0]),
+            "resolved": resolved,
+            "pending": int(row[2]),
+            "learned": int(row[3]),
+            "wins": wins,
+            "losses": losses,
+            "ties": int(row[6]),
+            "accuracy": (wins / decisive) if decisive else None,
+            "accuracy_ci95": wilson_interval(wins, decisive),
+        }
+
+    # ------------------------------------------------------------- audit events
+    def record_engine_event(
+        self,
+        pair: str,
+        dataset_id: str,
+        kind: str,
+        detail: str,
+        at: str | None = None,
+    ) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """INSERT INTO engine_events (pair, dataset_id, kind, detail, created_at)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (pair, dataset_id, kind, detail, at or datetime.now(timezone.utc).isoformat()),
+            )
+
+    def list_engine_events(self, limit: int = 25, dataset_id: str | None = None) -> list[dict]:
+        clause = " WHERE dataset_id = ?" if dataset_id else ""
+        parameters = (dataset_id,) if dataset_id else ()
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"""SELECT kind, detail, created_at AS at FROM engine_events{clause}
+                   ORDER BY id DESC LIMIT ?""",
+                (*parameters, max(1, int(limit))),
+            ).fetchall()
+        return [dict(row) for row in reversed(rows)]

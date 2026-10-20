@@ -1307,9 +1307,11 @@ class AutomationService:
             )
         elif model_ready and model.calibrator.flat:
             calibration_status = "blocked"
+            shadow = self.runtime.ledger.shadow_summary(dataset_id=self.runtime.dataset_id())
             calibration_detail = (
-                "Calibration collapsed to one level: the score has no usable rank signal, "
-                "so the gate abstains. More varied real outcomes are needed."
+                "Calibration collapsed to one level: the score has no usable rank signal, so the gate "
+                f"abstains. {shadow['resolved']:,} shadow outcomes have been collected for learning; "
+                "they are not traded, and the map can recover when the raw score regains rank structure."
             )
         else:
             calibration_status = "warning"
@@ -1329,12 +1331,14 @@ class AutomationService:
         )
 
         ready = all(item["status"] == "ready" for item in checks if item["required"])
+        shadow = self.runtime.ledger.shadow_summary(dataset_id=self.runtime.dataset_id())
         return {
             "generated_at": format_datetime(datetime.now(UTC)),
             "pair": pair,
             "source": source,
             "ready": ready,
             "checks": checks,
+            "shadow": shadow,
             "warmup": {
                 "resolved_outcomes": resolved,
                 "updates_start_after": update_starts,
