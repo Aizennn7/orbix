@@ -37,6 +37,15 @@ _REASON_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("no_pullback", ("no confirmed trend pullback",)),
     ("no_reversal", ("no confirmed range-edge reversal",)),
     ("inside_range", ("still inside the recent 20-candle range",)),
+    ("market_closed", ("market is closed for the weekend",)),
+    ("outside_session", ("outside my trading session",)),
+    ("session_quiet", ("the session just opened",)),
+    ("position_open", ("one trade at a time",)),
+    ("daily_trade_limit", ("daily budget is used up", "daily trade budget")),
+    ("trade_spacing", ("minutes since my last entry",)),
+    ("daily_loss_limit", ("daily loss limit",)),
+    ("loss_cooldown", ("losses in a row", "cooling off until")),
+    ("context_veto", ("my journal has",)),
     ("provider_unavailable", ("provider", "calendar", "not configured")),
 )
 
@@ -56,6 +65,15 @@ REASON_LABELS = {
     "no_reversal": "No confirmed reversal",
     "inside_range": "Price inside 20-bar range",
     "provider_unavailable": "Provider or calendar unavailable",
+    "market_closed": "Market closed (weekend)",
+    "outside_session": "Outside the trading session",
+    "session_quiet": "Session open - waiting for it to settle",
+    "position_open": "One trade at a time",
+    "daily_trade_limit": "Daily trade budget used",
+    "trade_spacing": "Too soon after the last entry",
+    "daily_loss_limit": "Daily loss limit hit",
+    "loss_cooldown": "Cooling off after losses",
+    "context_veto": "Journal memory veto",
     "other": "Other / unclassified",
 }
 

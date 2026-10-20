@@ -8,8 +8,9 @@ const ROUTES = {
   "strategy-lab": "Strategy lab",
   future: "Future",
   telegram: "Telegram channel",
+  trader: "Trader discipline",
 };
-const state = { market: null, strategies: null, lastSignal: null, route: "dashboard", providerKeys: [""], providerConfig: null, lastBacktestKey: null, backtestTimer: null, backtestRunning: false, automation: null, lastAutoSignalId: null, lastAutoCandleTimestamp: null, notificationsEnabled: false, toastTimer: null, telegram: null, telegramBusy: false, future: null, futureBusy: false, abstentions: null, modelSource: null };
+const state = { market: null, strategies: null, lastSignal: null, route: "dashboard", providerKeys: [""], providerConfig: null, lastBacktestKey: null, backtestTimer: null, backtestRunning: false, automation: null, lastAutoSignalId: null, lastAutoCandleTimestamp: null, notificationsEnabled: false, toastTimer: null, telegram: null, telegramBusy: false, future: null, futureBusy: false, abstentions: null, modelSource: null, trader: null };
 const $ = (selector) => document.querySelector(selector);
 
 async function api(path, options = {}) {
@@ -805,6 +806,143 @@ function clearProviderConfiguration() {
   $("#providerName").focus();
 }
 
+function utcClock(value, includeDate = false) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat(undefined, {
+    timeZone: "UTC",
+    ...(includeDate ? { day: "2-digit", month: "short" } : {}),
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date);
+}
+
+function streakLabel(streak) {
+  const value = Number(streak) || 0;
+  if (!value) return "flat";
+  return value > 0 ? `${value} win${value === 1 ? "" : "s"} in a row` : `${-value} loss${value === -1 ? "" : "es"} in a row`;
+}
+
+function renderTraderRules(status) {
+  const list = $("#traderRules");
+  list.replaceChildren();
+  const rules = status.rules || {};
+  const items = [
+    `Trade only ${status.sessions || "the configured hours"} UTC${status.weekdays_only ? ", Monday to Friday" : ""}.`,
+    `At most ${status.budget?.max ?? "—"} paper trades per day, at least ${rules.min_spacing_minutes ?? "—"} minutes apart.`,
+    `Leave the first ${rules.open_quiet_minutes ?? 0} minutes of a session alone.`,
+    `${rules.cooldown_after_losses ?? 2} losses in a row means ${rules.cooldown_minutes ?? 30} minutes off.`,
+    `${status.max_daily_losses ?? "—"} losses in a day ends the day.`,
+    `Avoid a strategy and session only after ${rules.context_min_samples ?? 20} resolved trades below ${Math.round((rules.context_min_win_rate ?? 0.45) * 100)}%.`,
+    "One open paper trade at a time.",
+  ];
+  for (const text of items) {
+    const item = document.createElement("li");
+    item.textContent = text;
+    list.appendChild(item);
+  }
+}
+
+function renderTraderPage(payload) {
+  const status = payload.status || {};
+  const idle = status.apply_rules === false;
+  $("#traderState").textContent = idle ? "RULES IDLE" : status.awake ? "AWAKE" : "ASLEEP";
+  $("#traderSession").textContent = status.window || "Outside session";
+  $("#traderNote").textContent = status.note || "No discipline note.";
+  $("#traderWindows").textContent = `${status.sessions || "—"} UTC`;
+  $("#traderNextOpen").textContent = status.awake ? "—" : (status.next_open ? `${utcClock(status.next_open, true)} UTC` : "—");
+  const budget = status.budget || {};
+  $("#traderBudget").textContent = `${budget.used ?? "—"} / ${budget.max ?? "—"} used`;
+  $("#traderLosses").textContent = `${status.losses_today ?? 0} / ${status.max_daily_losses ?? "—"}`;
+  $("#traderStreak").textContent = streakLabel(status.streak);
+  const waits = [];
+  if (status.cooldown_until) waits.push(`cool-off until ${utcClock(status.cooldown_until)} UTC`);
+  if (status.spacing_until && Date.parse(status.spacing_until) > Date.now()) waits.push(`next entry after ${utcClock(status.spacing_until)} UTC`);
+  $("#traderWait").textContent = waits.length ? waits.join(" · ") : "—";
+  $("#traderGradeNote").textContent = status.grade_note || "Conviction is a label, not a probability of profit.";
+  const configError = $("#traderConfigError");
+  configError.hidden = !status.config_error;
+  configError.textContent = status.config_error || "";
+
+  const reviews = payload.reviews || [];
+  const today = reviews[reviews.length - 1] || {};
+  $("#traderReviewDate").textContent = today.date || "—";
+  $("#traderReviewSummary").textContent = today.summary || "No trades reviewed yet.";
+  $("#traderReviewTrades").textContent = Number(today.trades || 0).toLocaleString();
+  $("#traderReviewRecord").textContent = `${today.wins ?? 0} / ${today.losses ?? 0}${today.ties ? ` · ${today.ties} tie` : ""}`;
+  $("#traderReviewPips").textContent = today.net_pips == null ? "—" : `${today.net_pips > 0 ? "+" : ""}${Number(today.net_pips).toFixed(1)}`;
+  $("#traderReviewRate").textContent = today.accuracy == null ? "—" : `${Math.round(today.accuracy * 100)}%`;
+  $("#traderReviewLesson").textContent = today.lesson || "A small sample is not a verdict.";
+
+  const journal = (payload.journal || []).slice().reverse();
+  const body = $("#traderJournalRows");
+  body.replaceChildren();
+  if (!journal.length) {
+    const row = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = 2;
+    cell.className = "empty-row";
+    cell.textContent = "No journal entries yet. It will write down every taken trade and every meaningful pass.";
+    row.appendChild(cell);
+    body.appendChild(row);
+  } else {
+    for (const entry of journal) {
+      const row = document.createElement("tr");
+      const when = document.createElement("td");
+      when.textContent = utcClock(entry.at, true);
+      const note = document.createElement("td");
+      note.textContent = entry.detail;
+      row.append(when, note);
+      body.appendChild(row);
+    }
+  }
+
+  const contexts = payload.contexts || [];
+  $("#traderContextCount").textContent = `${contexts.length} CONTEXT${contexts.length === 1 ? "" : "S"}`;
+  const contextBody = $("#traderContextRows");
+  contextBody.replaceChildren();
+  if (!contexts.length) {
+    const row = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = 5;
+    cell.className = "empty-row";
+    cell.textContent = "No resolved real or paper trades yet.";
+    row.appendChild(cell);
+    contextBody.appendChild(row);
+  } else {
+    for (const context of contexts) {
+      const row = document.createElement("tr");
+      const values = [
+        context.strategy || "—",
+        context.session || "—",
+        Number(context.total || 0).toLocaleString(),
+        context.win_rate == null ? "—" : `${Math.round(context.win_rate * 100)}%`,
+        context.note || (context.cautious ? "Avoid this context." : "No action."),
+      ];
+      for (const value of values) {
+        const cell = document.createElement("td");
+        cell.textContent = value;
+        row.appendChild(cell);
+      }
+      contextBody.appendChild(row);
+    }
+  }
+  renderTraderRules(status);
+}
+
+async function loadTraderPage() {
+  try {
+    const payload = await api("/api/trader?days=7");
+    state.trader = payload;
+    renderTraderPage(payload);
+  } catch (error) {
+    $("#traderState").textContent = "UNAVAILABLE";
+    $("#traderNote").textContent = `Discipline state unavailable: ${error.message}`;
+  }
+}
+
 function setActivePage(route, shouldScroll = true) {
   if (!Object.hasOwn(ROUTES, route)) route = "dashboard";
   state.route = route;
@@ -838,6 +976,7 @@ function setActivePage(route, shouldScroll = true) {
   }
   if (route === "future") void loadFuturePlan();
   if (route === "telegram") void refreshTelegramPage();
+  if (route === "trader") void loadTraderPage();
   if (route === "engine") void loadModelCard();
 }
 
@@ -1838,6 +1977,7 @@ function wireEvents() {
     if (button) resolvePaperSignal(button.dataset.resolveId, button);
   });
   $("#dismissNotice").addEventListener("click", () => { $("#feedNotice").hidden = true; });
+  $("#traderRefresh").addEventListener("click", () => { void loadTraderPage(); });
   $("#toggleCatalog").addEventListener("click", () => {
     const list = $("#catalogList");
     const isOpen = !list.hidden;
@@ -1873,6 +2013,7 @@ async function start() {
   await Promise.all([loadStrategies(), loadMarket(), refreshHistory(), refreshStorageSummary(), refreshAutomationStatus()]);
   scheduleAutomaticBacktest();
   window.setInterval(() => { void refreshAutomationStatus(); }, 10000);
+  window.setInterval(() => { if (state.route === "trader") void loadTraderPage(); }, 30000);
   if (state.route === "dashboard") startBlackholeAnimation();
 }
 

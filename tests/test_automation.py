@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 from datetime import datetime, timedelta, timezone
 import json
 import os
@@ -9,7 +10,7 @@ import unittest
 from unittest.mock import patch
 
 from orbix.automation import AutomationService, FinnhubEconomicCalendar, TwelveDataCsvProvider
-from orbix.domain import Candle
+from orbix.domain import Candle, format_datetime
 from orbix.runtime import Runtime
 
 
@@ -169,6 +170,96 @@ class AutomationTests(unittest.TestCase):
             self.assertEqual(resumed["status"], "synced")
             self.assertEqual(fake.calls, 1)
             self.assertFalse(json.loads(marker.read_text(encoding="utf-8"))["paused_by_user"])
+
+
+class DisciplineAutomationTests(unittest.TestCase):
+    def make_runtime(self, root: Path, last_bar: datetime) -> Runtime:
+        history = root / "history.csv"
+        first = last_bar - timedelta(minutes=319)
+        with history.open("w", newline="", encoding="utf-8") as output:
+            writer = csv.writer(output)
+            writer.writerow(["timestamp", "open", "high", "low", "close", "volume"])
+            for index in range(320):
+                stamp = first + timedelta(minutes=index)
+                opening = 1.1 + 0.00002 * index
+                close = opening + (0.00004 if index % 3 else -0.00003)
+                writer.writerow([
+                    format_datetime(stamp),
+                    format(opening, ".12f"),
+                    format(max(opening, close) + 0.00003, ".12f"),
+                    format(min(opening, close) - 0.00003, ".12f"),
+                    format(close, ".12f"),
+                    100,
+                ])
+        runtime = Runtime(data_dir=root / "data")
+        runtime.import_csv_file(history, "EUR/USD")
+        return runtime
+
+    def test_outside_the_session_no_signal_is_generated_at_all(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            last_bar = datetime(2026, 10, 21, 2, 59, tzinfo=UTC)  # Wednesday, Asia
+            runtime = self.make_runtime(root, last_bar)
+            service = AutomationService(runtime)
+            service.strategy_id = "orbix_confluence"
+            with patch.object(runtime, "generate_signal") as spy:
+                service._analyze_new_bar(
+                    runtime.candles[-1],
+                    datetime(2026, 10, 21, 3, 0, tzinfo=UTC),
+                    is_live=False,
+                    require_news=False,
+                    max_delay=120,
+                )
+            spy.assert_not_called()
+            self.assertIn("outside my trading session", service._last_auto_status)
+            self.assertEqual(runtime.ledger.list_recent(), [])
+            # Resting outside the session is not a per-bar setup decision, so it
+            # must not flood the abstention ledger.
+            self.assertEqual(runtime.ledger.abstention_summary()["totals"]["all_time"], 0)
+            runtime.candle_store.close()
+
+    def test_inside_the_session_the_trade_gets_a_grade_and_a_journal_line(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            last_bar = datetime(2026, 10, 21, 9, 59, tzinfo=UTC)  # London
+            runtime = self.make_runtime(root, last_bar)
+            service = AutomationService(runtime)
+            service.strategy_id = "orbix_confluence"
+            entry = last_bar + timedelta(minutes=1)
+            fake = {
+                "signal_id": "discipline-1",
+                "pair": "EUR/USD",
+                "strategy": "orbix_confluence",
+                "side": "BUY",
+                "entry_price": 1.1,
+                "entry_time": format_datetime(entry),
+                "prediction_time": format_datetime(entry + timedelta(minutes=1)),
+                "probability_up": 0.60,
+                "uncertainty": 0.02,
+                "source": "IMPORTED CSV",
+                "reason": "test setup",
+                "is_live": False,
+                "paper_only": True,
+            }
+            with patch.object(runtime, "generate_signal", return_value=dict(fake)):
+                service._analyze_new_bar(
+                    runtime.candles[-1],
+                    entry,
+                    is_live=False,
+                    require_news=False,
+                    max_delay=120,
+                )
+            payload = service._latest_auto_signal
+            self.assertEqual(payload["side"], "BUY")
+            self.assertEqual(payload["discipline"]["grade"], "A")
+            self.assertGreaterEqual(payload["discipline"]["conviction"], 0.7)
+            self.assertEqual(payload["discipline"]["budget_max"], 6)
+            journal = runtime.ledger.list_engine_events(
+                10, dataset_id=runtime.dataset_id(), kinds=("journal",)
+            )
+            self.assertEqual(len(journal), 1)
+            self.assertIn("Took BUY", journal[0]["detail"])
+            runtime.candle_store.close()
 
 
 if __name__ == "__main__":

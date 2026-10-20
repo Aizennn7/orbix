@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import math
+import os
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -158,7 +159,10 @@ class ImportedAutomationTests(unittest.TestCase):
         first = now - timedelta(minutes=minutes_ago)
         history = root / "history.csv"
         write_history(history, minutes_ago, first)
-        runtime = Runtime(data_dir=root / "data")
+        # This test exercises the imported paper path, not the human session
+        # clock, so it runs with the trading window open all day.
+        with mock.patch.dict(os.environ, {"ORBIX_TRADING_SESSIONS": "all"}):
+            runtime = Runtime(data_dir=root / "data")
         runtime.import_csv_file(history, "EUR/USD")
         return runtime
 

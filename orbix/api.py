@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import tempfile
 from typing import Callable
@@ -196,6 +196,47 @@ def model_maintenance() -> dict:
 @app.get("/api/automation/status")
 def automation_status() -> dict:
     return automation.status()
+
+
+@app.get("/api/trader")
+def trader(days: int = 7) -> dict:
+    """Human-style discipline state, recent journal, and daily reviews.
+
+    This describes what the automatic path would do, not a forecast. The rules
+    can only reduce activity; they cannot create an edge.
+    """
+    with runtime.lock:
+        pair = runtime.pair
+        source = runtime.source
+        dataset_id = runtime.dataset_id()
+        latest = runtime.candles[-1] if runtime.candles else None
+        reference = (
+            latest.timestamp + timedelta(minutes=1)
+            if source == "IMPORTED CSV" and latest is not None
+            else datetime.now(timezone.utc)
+        )
+        status = runtime.discipline.status(
+            pair=pair,
+            reference=reference,
+            apply_rules=source != "SYNTHETIC DEMO",
+        )
+        reviews = runtime.discipline.reviews(pair=pair, days=days, reference=reference)
+        contexts = runtime.discipline.contexts(pair=pair)
+        journal = runtime.ledger.list_engine_events(
+            max(1, min(200, days * 20)),
+            dataset_id=dataset_id,
+            kinds=("journal",),
+        )
+    return {
+        "pair": pair,
+        "source": source,
+        "dataset_id": dataset_id,
+        "reference": reference.isoformat(),
+        "status": status,
+        "reviews": reviews,
+        "contexts": contexts,
+        "journal": journal,
+    }
 
 
 @app.get("/api/preflight")

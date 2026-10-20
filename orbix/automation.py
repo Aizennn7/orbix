@@ -459,7 +459,13 @@ class AutomationService:
         limit = self.max_entry_delay_seconds if max_delay is None else max(1, int(max_delay))
         return delay < 0 or delay > limit
 
-    def _record_skip_abstention(self, entry_time: datetime | None, reason: str) -> None:
+    def _record_skip_abstention(
+        self,
+        entry_time: datetime | None,
+        reason: str,
+        *,
+        kind: str = "operational",
+    ) -> None:
         """Log why a closed bar produced no signal. Never raises into the loop."""
         try:
             dataset_id = self.runtime.dataset_id()
@@ -467,13 +473,48 @@ class AutomationService:
                 pair=self.market_pair,
                 strategy=self.strategy_id,
                 reason=reason,
-                kind="operational",
+                kind=kind,
                 entry_time=entry_time,
                 source=self.runtime.source,
                 dataset_id=dataset_id,
             )
         except Exception:
             # A logging failure must never stop the feed.
+            pass
+
+    def _journal(self, detail: str, pair: str, entry_time: datetime | None) -> None:
+        """Write one human-readable line to the trading journal. Never raises."""
+        try:
+            self.runtime.ledger.record_engine_event(
+                pair=pair,
+                dataset_id=self.runtime.dataset_id(),
+                kind="journal",
+                detail=detail,
+                at=format_datetime(entry_time) if entry_time else None,
+            )
+        except Exception:
+            pass
+
+    def _journal_once(
+        self,
+        tag: str,
+        detail: str,
+        pair: str,
+        entry_time: datetime | None,
+    ) -> None:
+        """Write a meaningful pass once per day (or once per cool-off)."""
+        try:
+            moment = entry_time or datetime.now(UTC)
+            day_start = moment.replace(hour=0, minute=0, second=0, microsecond=0)
+            if self.runtime.ledger.has_engine_event(
+                "journal",
+                since=format_datetime(day_start),
+                contains=f"[{tag}]",
+                dataset_id=self.runtime.dataset_id(),
+            ):
+                return
+            self._journal(f"[{tag}] {detail}", pair, entry_time)
+        except Exception:
             pass
 
     def _analyze_new_bar(
@@ -519,6 +560,29 @@ class AutomationService:
             self._save_marker()
             return
 
+        # A disciplined trader is not at the screen every minute. This gate can
+        # only remove trades: sessions, a daily budget, spacing, cool-offs, a
+        # loss stop, and memory of contexts that have lost. It never adds a
+        # signal, and the dataset learner keeps learning from every bar.
+        verdict = self.runtime.discipline.assess(
+            pair=pair,
+            strategy=self.strategy_id,
+            entry_time=entry_time,
+        )
+        if not verdict.allowed:
+            self._last_auto_status = verdict.note
+            # Being asleep, waiting out the clock, or having used the day's
+            # budget are not per-bar setup decisions. They stay in the status
+            # instead of flooding the abstention ledger. Meaningful passes are
+            # journaled once, not on every minute of the wait.
+            if verdict.journal:
+                tag = verdict.code
+                if verdict.cooldown_until:
+                    tag += f":{verdict.cooldown_until[11:16]}"
+                self._journal_once(tag, verdict.note, pair, entry_time)
+            self._save_marker()
+            return
+
         try:
             signal = self.runtime.generate_signal(
                 pair,
@@ -528,6 +592,10 @@ class AutomationService:
                 is_live=is_live,
             )
             strategy_name = next((item["name"] for item in EXECUTABLE_STRATEGIES if item["id"] == self.strategy_id), self.strategy_id)
+            if signal["side"] != "NO SIGNAL":
+                trade = self.runtime.discipline.describe(signal, verdict)
+                signal["discipline"] = trade
+                self._journal(trade["note"], pair, entry_time)
             signal["heading"] = f"{strategy_name} · {signal['side']}"
             signal["automatic"] = True
             signal["automation_generated_at"] = format_datetime(now)
@@ -1295,6 +1363,15 @@ class AutomationService:
             "imported_max_entry_delay_seconds": self.imported_max_entry_delay,
             "dataset_learning": self.runtime.dataset_learning_status(),
             "last_dataset_learning": self._last_dataset_learning,
+            "discipline": self.runtime.discipline.status(
+                pair=self.runtime.pair,
+                reference=(
+                    latest.timestamp + timedelta(minutes=1)
+                    if latest is not None and source == "IMPORTED CSV"
+                    else now
+                ),
+                apply_rules=source != "SYNTHETIC DEMO",
+            ),
             "market": {
                 "provider": "Twelve Data",
                 "configured": self.market_provider.configured,

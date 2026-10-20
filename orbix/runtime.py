@@ -11,6 +11,7 @@ import threading
 from .abstentions import classify_reason
 from .calibration import reliability_bins
 from .candle_store import CandleStore, TAIL_ROWS
+from .discipline import TraderDiscipline
 from .domain import Candle, format_datetime, parse_datetime
 from .engine import PredictionEngine
 from .features import FEATURE_NAMES, FEATURE_VERSION, compute_features
@@ -52,6 +53,7 @@ class Runtime:
         self.lock = threading.RLock()
         self.candle_store = CandleStore(self.data_dir / "candles.duckdb")
         self.ledger = PaperLedger(self.data_dir / "orbix.sqlite3")
+        self.discipline = TraderDiscipline(self.ledger)
         self.engine = PredictionEngine()
         self.settings = engine_config_from_env(os.environ)
         self.pair = "EUR/USD"

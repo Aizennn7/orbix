@@ -218,6 +218,57 @@ class PaperLedger:
             row = connection.execute("SELECT * FROM signals WHERE signal_id = ?", (signal_id,)).fetchone()
         return dict(row) if row else None
 
+    # ------------------------------------------------------ human-style review
+    def day_signals(self, pair: str, start: datetime, end: datetime) -> list[dict]:
+        """Signals with an entry inside one UTC trading day, oldest first."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                """SELECT entry_time, strategy, side, status, entry_price, exit_price, outcome
+                   FROM signals
+                   WHERE pair = ? AND entry_time >= ? AND entry_time < ?
+                     AND entry_time != '' AND source != 'SYNTHETIC DEMO'
+                   ORDER BY entry_time""",
+                (pair.upper(), start.isoformat(), end.isoformat()),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def recent_results(self, pair: str, limit: int = 12) -> list[dict]:
+        """Most recent decided outcomes for a pair, oldest first."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                """SELECT entry_time, strategy, side, outcome
+                   FROM signals
+                   WHERE pair = ? AND status = 'RESOLVED'
+                     AND outcome IN ('WIN', 'LOSS') AND entry_time != ''
+                     AND source != 'SYNTHETIC DEMO'
+                   ORDER BY entry_time DESC LIMIT ?""",
+                (pair.upper(), max(1, int(limit))),
+            ).fetchall()
+        return [dict(row) for row in reversed(rows)]
+
+    def pending_count(self, pair: str) -> int:
+        with self._connect() as connection:
+            row = connection.execute(
+                """SELECT COUNT(*) AS pending FROM signals
+                   WHERE pair = ? AND status = 'PENDING' AND source != 'SYNTHETIC DEMO'""",
+                (pair.upper(),),
+            ).fetchone()
+        return int(row["pending"]) if row else 0
+
+    def context_rows(self, pair: str) -> list[dict]:
+        """Decided non-synthetic outcomes used for context memory."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                """SELECT strategy, entry_time, outcome
+                   FROM signals
+                   WHERE pair = ? AND status = 'RESOLVED'
+                     AND outcome IN ('WIN', 'LOSS')
+                     AND source != 'SYNTHETIC DEMO' AND entry_time != ''
+                   ORDER BY entry_time""",
+                (pair.upper(),),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def list_pending(self, pair: str, dataset_id: str) -> list[dict]:
         with self._connect() as connection:
             rows = connection.execute(
@@ -863,9 +914,44 @@ class PaperLedger:
                 (pair, dataset_id, kind, detail, at or datetime.now(timezone.utc).isoformat()),
             )
 
-    def list_engine_events(self, limit: int = 25, dataset_id: str | None = None) -> list[dict]:
-        clause = " WHERE dataset_id = ?" if dataset_id else ""
-        parameters = (dataset_id,) if dataset_id else ()
+    def has_engine_event(
+        self,
+        kind: str,
+        *,
+        since: str,
+        contains: str | None = None,
+        dataset_id: str | None = None,
+    ) -> bool:
+        conditions = ["kind = ?", "created_at >= ?"]
+        parameters: list = [kind, since]
+        if contains:
+            conditions.append("detail LIKE ?")
+            parameters.append(f"%{contains}%")
+        if dataset_id:
+            conditions.append("dataset_id = ?")
+            parameters.append(dataset_id)
+        with self._connect() as connection:
+            row = connection.execute(
+                f"""SELECT 1 FROM engine_events WHERE {' AND '.join(conditions)} LIMIT 1""",
+                parameters,
+            ).fetchone()
+        return row is not None
+
+    def list_engine_events(
+        self,
+        limit: int = 25,
+        dataset_id: str | None = None,
+        kinds: tuple[str, ...] | None = None,
+    ) -> list[dict]:
+        conditions = []
+        parameters: list = []
+        if dataset_id:
+            conditions.append("dataset_id = ?")
+            parameters.append(dataset_id)
+        if kinds:
+            conditions.append(f"kind IN ({','.join('?' for _ in kinds)})")
+            parameters.extend(kinds)
+        clause = f" WHERE {' AND '.join(conditions)}" if conditions else ""
         with self._connect() as connection:
             rows = connection.execute(
                 f"""SELECT kind, detail, created_at AS at FROM engine_events{clause}

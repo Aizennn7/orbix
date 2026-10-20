@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#050505">
   <title>Dashboard — Orbix Signal Lab</title>
-  <link rel="stylesheet" href="/static/styles.css?v=17">
+  <link rel="stylesheet" href="/static/styles.css?v=18">
 </head>
 <body>
   <div class="noise" aria-hidden="true"></div>
@@ -30,6 +30,7 @@
       <a href="#paper" data-route="paper">Paper log</a>
       <a href="#strategy-lab" data-route="strategy-lab">Strategy lab</a>
       <a href="#future" data-route="future">Future</a>
+      <a href="#trader" data-route="trader">Trader</a>
       <a href="#telegram" data-route="telegram">Telegram</a>
     </nav>
     <div class="top-status">
@@ -444,6 +445,60 @@
       </article>
     </section>
 
+    <section class="page-view" id="page-trader" data-page="trader" aria-labelledby="trader-title" hidden>
+      <header class="page-heading">
+        <div><div class="eyebrow"><span class="eyebrow-line"></span> HUMAN-STYLE DISCIPLINE</div><h1 id="trader-title">Trader</h1><p>It sleeps outside its sessions, takes a handful of setups, waits after losses, stops at its daily limit, and remembers the contexts that burned it. These rules only reduce activity. They are not an accuracy claim.</p></div>
+        <div class="blackhole-mini" aria-hidden="true"><i class="mini-ring ring-one"></i><i class="mini-ring ring-two"></i><b></b></div>
+      </header>
+      <div class="future-layout">
+        <article class="panel future-focus-panel">
+          <div class="panel-heading"><div><div class="eyebrow small-eyebrow">RIGHT NOW</div><h2 id="traderState">READING…</h2></div><span class="mode-tag" id="traderSession">—</span></div>
+          <p class="panel-intro" id="traderNote">Loading the discipline state…</p>
+          <div class="future-focus-grid">
+            <div><span>TRADING WINDOWS (UTC)</span><strong id="traderWindows">—</strong></div>
+            <div><span>NEXT WAKE-UP</span><strong id="traderNextOpen">—</strong></div>
+            <div><span>TRADE BUDGET</span><strong id="traderBudget">—</strong></div>
+            <div><span>LOSSES TODAY</span><strong id="traderLosses">—</strong></div>
+            <div><span>STREAK</span><strong id="traderStreak">—</strong></div>
+            <div><span>COOL-OFF / SPACING</span><strong id="traderWait">—</strong></div>
+          </div>
+          <p class="micro-copy" id="traderGradeNote">Conviction is a label, not a probability of profit.</p>
+          <p class="micro-copy" id="traderConfigError" role="status" hidden></p>
+        </article>
+        <aside class="panel future-evidence-panel">
+          <div class="eyebrow small-eyebrow">TODAY'S REVIEW</div>
+          <h2 id="traderReviewDate">—</h2>
+          <p class="panel-intro" id="traderReviewSummary">No trades reviewed yet.</p>
+          <div class="future-evidence-grid">
+            <div class="result-stat"><span>TRADES</span><strong id="traderReviewTrades">—</strong></div>
+            <div class="result-stat"><span>WINS / LOSSES</span><strong id="traderReviewRecord">—</strong></div>
+            <div class="result-stat"><span>NET PIPS</span><strong id="traderReviewPips">—</strong></div>
+            <div class="result-stat"><span>HIT RATE</span><strong id="traderReviewRate">—</strong></div>
+          </div>
+          <p class="micro-copy" id="traderReviewLesson">A small sample is not a verdict.</p>
+        </aside>
+      </div>
+      <article class="panel">
+        <div class="panel-heading"><div><div class="eyebrow small-eyebrow">JOURNAL</div><h2>What it did, and why</h2></div><button class="text-button" id="traderRefresh" type="button">REFRESH ↻</button></div>
+        <div class="history-table-wrap">
+          <table class="history-table"><thead><tr><th>TIME (UTC)</th><th>NOTE</th></tr></thead><tbody id="traderJournalRows"><tr><td colspan="2" class="empty-row">No journal entries yet.</td></tr></tbody></table>
+        </div>
+        <p class="micro-copy">Only taken trades and meaningful passes (budget, cool-off, loss stop, context veto) are written here, once each. Being asleep or waiting is shown above instead of being logged every minute.</p>
+      </article>
+      <article class="panel">
+        <div class="panel-heading"><div><div class="eyebrow small-eyebrow">MEMORY OF MISTAKES</div><h2>Context record</h2></div><span class="mode-tag" id="traderContextCount">—</span></div>
+        <div class="history-table-wrap">
+          <table class="history-table"><thead><tr><th>STRATEGY</th><th>SESSION</th><th>TRADES</th><th>HIT RATE</th><th>JOURNAL SAYS</th></tr></thead><tbody id="traderContextRows"><tr><td colspan="5" class="empty-row">No resolved trades yet.</td></tr></tbody></table>
+        </div>
+        <p class="micro-copy">A context needs the configured minimum sample before it can veto anything, so two unlucky trades cannot ban a setup.</p>
+      </article>
+      <article class="panel">
+        <div class="panel-heading"><div><div class="eyebrow small-eyebrow">THE RULES</div><h2>Limits, not predictions</h2></div></div>
+        <ol class="setup-steps" id="traderRules"><li>Loading the rules…</li></ol>
+        <p class="micro-copy">The model still learns from every completed bar. These rules govern paper signals and delivery only; they never add a trade and cannot manufacture an edge.</p>
+      </article>
+    </section>
+
     <section class="page-view" id="page-telegram" data-page="telegram" aria-labelledby="telegram-title" hidden>
       <header class="page-heading">
         <div><div class="eyebrow"><span class="eyebrow-line"></span> ONE-CLICK DELIVERY</div><h1 id="telegram-title">Telegram channel</h1><p>Publish recorded M1 research signals to the single channel your admin bot can post in. The signal engine, its strategy, and every other page stay unchanged.</p></div>
@@ -504,6 +559,6 @@
     <p>Signal research only. Live feeds are optional/configured on the server. No Quotex login or real trades.</p>
     <span class="footer-right">BUILT FOR BETTER QUESTIONS</span>
   </footer>
-  <script src="/static/app.js?v=17" defer></script>
+  <script src="/static/app.js?v=18" defer></script>
 </body>
 </html>
