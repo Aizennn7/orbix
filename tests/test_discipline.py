@@ -97,6 +97,38 @@ class DisciplineTests(unittest.TestCase):
         self.assertIn("outside my trading session", verdict.note)
         self.assertIn("07:00", verdict.note)
 
+    def test_a_pending_paper_trade_in_another_dataset_does_not_block_the_live_one(self) -> None:
+        moment = next_weekday(datetime(2026, 10, 21, 8, 0, tzinfo=UTC))
+        signal = Signal(
+            signal_id=uuid4().hex,
+            pair="EUR/USD",
+            strategy="orbix_confluence",
+            side="BUY",
+            entry_price=1.1,
+            generated_at=moment,
+            expires_at=moment + timedelta(minutes=1),
+            probability_up=0.58,
+            source="IMPORTED CSV",
+            reason="pending paper trade",
+            entry_time=moment,
+        )
+        self.ledger.record(signal, {}, dataset_id="historical-dataset")
+        live = self.discipline.assess(
+            pair="EUR/USD",
+            strategy="orbix_confluence",
+            entry_time=moment,
+            dataset_id="live-dataset",
+        )
+        historical = self.discipline.assess(
+            pair="EUR/USD",
+            strategy="orbix_confluence",
+            entry_time=moment,
+            dataset_id="historical-dataset",
+        )
+        self.assertTrue(live.allowed, live.note)
+        self.assertFalse(historical.allowed)
+        self.assertEqual(historical.code, "position_open")
+
     def test_weekend_market_is_closed(self) -> None:
         moment = datetime(2026, 10, 24, 8, 30, tzinfo=UTC)  # Saturday
         verdict = self.discipline.assess(

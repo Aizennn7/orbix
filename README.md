@@ -25,6 +25,22 @@ Built-in server-side adapters use [Twelve Data's time-series endpoint](https://t
 
 Environment settings are in `.env.example`: pair, polling intervals, event-time timezone, pre/post news-blackout windows, maximum candle age, maximum late-entry delay, auto strategy, and whether automated signals are enabled. Finnhub event times without an explicit timezone use `ORBIX_FINNHUB_TIMEZONE`; verify that setting against the provider's account/feed. Credentials stay server-side. Precedence is server environment, then keys saved from the Connections page, then unconfigured. The manual **Return to demo data** action pauses the provider loop until you explicitly sync it again.
 
+## Live deployment checklist
+
+Orbix can run on a real Twelve Data feed with a live news guard, but it does **not** place broker orders. Treat this as a signal and paper-trading system, not a trading bot. Before pointing it at real money:
+
+1. **Credentials.** Save and test the Twelve Data, Finnhub, and optional Telegram credentials on **Data connections**. All required preflight checks must be green; a blocked check means no automatic signals.
+2. **Network exposure.** Set `ORBIX_DASHBOARD_PASSWORD` (and optionally `ORBIX_DASHBOARD_USER`) so every page and API route requires HTTP Basic auth. Serve it only behind HTTPS, for example with a reverse proxy that terminates TLS. Without a password, anyone who can reach the URL can replace keys, pause signals, or post to Telegram.
+3. **One process.** Run exactly one Uvicorn worker. DuckDB, SQLite, and the JSON markers are single-process stores. Keep the data directory on persistent storage and back it up before upgrades; it contains candles, paper outcomes, learned models, and `provider_settings.json`.
+4. **Clocks.** The live path evaluates a closed M1 bar within 10 seconds of its boundary (`ORBIX_MAX_ENTRY_DELAY_SECONDS`). Keep NTP enabled on the host. A slow provider response is skipped rather than signalled late; raise the limit only if you understand that a late entry shortens the expiry window.
+5. **Feed behaviour.** Automatic sync never overwrites a manual CSV. The first provider sync activates a new dataset; later syncs append only new closed bars. A restart reuses the recorded provider dataset instead of re-importing it.
+6. **Failure handling.** If the calendar refresh fails, it retries within 60 seconds. Automatic signals stay paused while the calendar is unavailable, stale, or blacked out, and while the feed is stale or paused.
+7. **Human limits.** Sessions, a daily budget, minimum spacing, a loss stop, cool-offs, and dataset-scoped open-trade checks are on by default. They can only remove trades. They cannot create an edge.
+8. **Execution is manual.** `GET /api/broker` reports `official_api: false` and `order_execution: false`. Pocket Option has no official public trading API, so Orbix shows a manual CALL/PUT ticket instead of sending an order. No cookie scraping or unofficial order bridge is included.
+9. **No profit claim.** The collected cadence sample was 149 signals, 43.4% wins (95% CI 35.3–51.8%), below the 55.6% break-even at an 80% payout. That is a measurement, not a forecast. Start in paper mode and keep the size small until you have your own resolved record.
+
+`GET /api/preflight` reports the configuration and warm-up checks; `/api/health` exposes `live_feed_connected`, `event_calendar_connected`, `dashboard_auth_enabled`, and `clock`. Neither is a performance forecast.
+
 ## Run it without live credentials
 
 ```bash

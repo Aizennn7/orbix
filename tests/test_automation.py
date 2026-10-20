@@ -74,7 +74,11 @@ class AutomationTests(unittest.TestCase):
     def test_preflight_lists_blockers_and_warmup(self) -> None:
         with tempfile.TemporaryDirectory() as folder, patch.dict(
             os.environ,
-            {"ORBIX_TWELVE_DATA_API_KEY": "", "ORBIX_FINNHUB_API_KEY": ""},
+            {
+                "ORBIX_TWELVE_DATA_API_KEY": "",
+                "ORBIX_FINNHUB_API_KEY": "",
+                "ORBIX_DASHBOARD_PASSWORD": "",
+            },
             clear=False,
         ):
             runtime = Runtime(folder)
@@ -87,9 +91,25 @@ class AutomationTests(unittest.TestCase):
         self.assertEqual(checks["scheduler"]["status"], "ready")
         self.assertEqual(checks["telegram"]["status"], "warning")
         self.assertFalse(checks["telegram"]["required"])
+        self.assertEqual(checks["execution"]["status"], "warning")
+        self.assertFalse(checks["execution"]["required"])
+        self.assertEqual(checks["dashboard_auth"]["status"], "warning")
+        self.assertFalse(checks["dashboard_auth"]["required"])
+        self.assertFalse(report["execution_ready"])
+        self.assertEqual(report["execution_mode"], "MANUAL")
+        self.assertFalse(report["dashboard_auth_enabled"])
         self.assertEqual(report["warmup"]["resolved_outcomes"], 0)
         self.assertEqual(report["warmup"]["to_calibration"], 60)
         self.assertIn("not a performance forecast", report["note"])
+
+    def test_calendar_refresh_cannot_outlive_the_news_guard(self) -> None:
+        with tempfile.TemporaryDirectory() as folder, patch.dict(
+            os.environ,
+            {"ORBIX_NEWS_REFRESH_SECONDS": "86400"},
+            clear=False,
+        ):
+            service = AutomationService(Runtime(folder))
+        self.assertEqual(service.calendar_refresh_seconds, 1800)
 
     def test_datetime_header_is_accepted_by_candle_store_ingestion(self) -> None:
         with tempfile.TemporaryDirectory() as folder:

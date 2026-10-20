@@ -231,6 +231,7 @@ class TraderDiscipline:
         strategy: str,
         entry_time: datetime | str,
         side: str | None = None,
+        dataset_id: str | None = None,
     ) -> Verdict:
         """Decide whether a disciplined trader would take this minute."""
         settings = self.settings
@@ -271,11 +272,11 @@ class TraderDiscipline:
 
         day_start = datetime.combine(moment.date(), time(0, 0), UTC)
         day_end = day_start + timedelta(days=1)
-        day = self.ledger.day_signals(pair, day_start, day_end)
+        day = self.ledger.day_signals(pair, day_start, day_end, dataset_id)
         trades_today = len(day)
         losses_today = sum(1 for row in day if row.get("outcome") == "LOSS")
         last_entry = _last_entry(day)
-        pending = self.ledger.pending_count(pair)
+        pending = self.ledger.pending_count(pair, dataset_id)
 
         open_trades = sum(
             1 for row in day if str(row.get("status") or "").upper() == "PENDING"
@@ -357,7 +358,7 @@ class TraderDiscipline:
                 journal=True,
             )
 
-        context = self.context_for(pair, strategy, session)
+        context = self.context_for(pair, strategy, session, dataset_id)
         if (
             context
             and context["total"] >= settings.context_min_samples
@@ -405,8 +406,8 @@ class TraderDiscipline:
         )
 
     # ------------------------------------------------------------- memory/grade
-    def _streak(self, pair: str) -> tuple[int, datetime | None]:
-        rows = self.ledger.recent_results(pair, limit=12)
+    def _streak(self, pair: str, dataset_id: str | None = None) -> tuple[int, datetime | None]:
+        rows = self.ledger.recent_results(pair, limit=12, dataset_id=dataset_id)
         streak = 0
         last_loss_at: datetime | None = None
         for row in reversed(rows):
@@ -423,8 +424,14 @@ class TraderDiscipline:
                 streak -= 1
         return streak, last_loss_at
 
-    def context_for(self, pair: str, strategy: str, session: str) -> dict[str, Any] | None:
-        rows = self.ledger.context_rows(pair)
+    def context_for(
+        self,
+        pair: str,
+        strategy: str,
+        session: str,
+        dataset_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        rows = self.ledger.context_rows(pair, dataset_id)
         wins = total = 0
         for row in rows:
             if row.get("strategy") != strategy:
@@ -446,8 +453,8 @@ class TraderDiscipline:
             and wins / total < self.settings.context_min_win_rate,
         }
 
-    def contexts(self, pair: str) -> list[dict[str, Any]]:
-        rows = self.ledger.context_rows(pair)
+    def contexts(self, pair: str, dataset_id: str | None = None) -> list[dict[str, Any]]:
+        rows = self.ledger.context_rows(pair, dataset_id)
         buckets: dict[tuple[str, str], dict[str, int]] = {}
         for row in rows:
             session = session_for(row.get("entry_time"))
@@ -532,6 +539,7 @@ class TraderDiscipline:
         pair: str,
         reference: datetime | None = None,
         apply_rules: bool = True,
+        dataset_id: str | None = None,
     ) -> dict[str, Any]:
         settings = self.settings
         moment = _as_utc(reference or datetime.now(UTC))
@@ -540,9 +548,9 @@ class TraderDiscipline:
             settings.enabled and apply_rules and self.market_open(moment) and window is not None
         )
         day_start = datetime.combine(moment.date(), time(0, 0), UTC)
-        day = self.ledger.day_signals(pair, day_start, day_start + timedelta(days=1))
+        day = self.ledger.day_signals(pair, day_start, day_start + timedelta(days=1), dataset_id)
         losses_today = sum(1 for row in day if row.get("outcome") == "LOSS")
-        streak, last_loss_at = self._streak(pair)
+        streak, last_loss_at = self._streak(pair, dataset_id)
         upcoming = None if awake else self.next_open(moment)
         cooldown_until = None
         if (
@@ -624,9 +632,10 @@ class TraderDiscipline:
         *,
         pair: str,
         day: date,
+        dataset_id: str | None = None,
     ) -> dict[str, Any]:
         start = datetime.combine(day, time(0, 0), UTC)
-        rows = self.ledger.day_signals(pair, start, start + timedelta(days=1))
+        rows = self.ledger.day_signals(pair, start, start + timedelta(days=1), dataset_id)
         resolved = [row for row in rows if row.get("outcome") in {"WIN", "LOSS", "TIE"}]
         wins = sum(1 for row in resolved if row["outcome"] == "WIN")
         losses = sum(1 for row in resolved if row["outcome"] == "LOSS")
@@ -692,11 +701,18 @@ class TraderDiscipline:
             return "More wins than losses. That is still not an edge; the payout hurdle is above 50%."
         return "Even split. No conclusion from a handful of trades."
 
-    def reviews(self, *, pair: str, days: int = 7, reference: datetime | None = None) -> list[dict[str, Any]]:
+    def reviews(
+        self,
+        *,
+        pair: str,
+        days: int = 7,
+        reference: datetime | None = None,
+        dataset_id: str | None = None,
+    ) -> list[dict[str, Any]]:
         moment = _as_utc(reference or datetime.now(UTC))
         count = max(1, min(30, int(days)))
         return [
-            self.review(pair=pair, day=moment.date() - timedelta(days=offset))
+            self.review(pair=pair, day=moment.date() - timedelta(days=offset), dataset_id=dataset_id)
             for offset in range(count - 1, -1, -1)
         ]
 

@@ -9,7 +9,7 @@ from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from orbix.automation import AutomationService
-from orbix.domain import Candle, Signal
+from orbix.domain import Signal
 from orbix.future import _replay, build_future_plan
 from orbix.runtime import Runtime
 from orbix.telegram import TelegramError, TelegramNotifier

@@ -19,6 +19,7 @@ from .brokers import pocket_option_ticket
 from .domain import Candle, format_datetime, parse_datetime
 from .market_data import parse_candles_csv, validate_candles
 from .runtime import Runtime
+from .security import dashboard_credentials
 from .strategies import EXECUTABLE_STRATEGIES
 from .telegram import TelegramError, TelegramNotifier
 
@@ -373,7 +374,10 @@ class AutomationService:
         self._calendar_config_error: str | None = None
         self.calendar = self._make_calendar(os.getenv("ORBIX_FINNHUB_API_KEY"))
         self.refresh_seconds = _env_int("ORBIX_MARKET_REFRESH_SECONDS", 60, 60, 3600)
-        self.calendar_refresh_seconds = _env_int("ORBIX_NEWS_REFRESH_SECONDS", 900, 300, 86400)
+        # The news guard treats a calendar older than 30 minutes as unavailable.
+        # Refreshing less often than that would leave valid events unusable, so
+        # the interval is capped to the same freshness window.
+        self.calendar_refresh_seconds = _env_int("ORBIX_NEWS_REFRESH_SECONDS", 900, 300, 1800)
         self.max_entry_delay_seconds = _env_int("ORBIX_MAX_ENTRY_DELAY_SECONDS", 10, 1, 30)
         self.max_bar_age_seconds = _env_int("ORBIX_MAX_BAR_AGE_SECONDS", 180, 60, 900)
         self.auto_signals_enabled = _env_bool("ORBIX_AUTO_SIGNALS", True)
@@ -416,6 +420,12 @@ class AutomationService:
         self._sync_lock = threading.Lock()
         self._state_lock = threading.RLock()
         self._task: asyncio.Task | None = None
+        # Scheduler deadlines live on the instance so newly saved credentials
+        # take effect without waiting for a restart.
+        self._next_market = 0.0 if self.market_provider.configured else float("inf")
+        self._next_calendar = 0.0 if self.calendar.configured else float("inf")
+        self._next_dataset = time.monotonic() + 5.0 if self.auto_imported else float("inf")
+        self._next_learning = time.monotonic() + 900.0
         self._user_paused = False
         self._feed_dataset_id: str | None = None
         self._last_analyzed_timestamp: datetime | None = None
@@ -465,6 +475,11 @@ class AutomationService:
         if (token, chat_id) != (self.telegram.bot_token, self.telegram.chat_id):
             self.telegram = TelegramNotifier(token, chat_id)
             self._telegram_last_error = self._telegram_timezone_error
+        # Wake the scheduler for newly configured (or replaced) keys; the loop
+        # rechecks these deadlines at least every few seconds.
+        with self._state_lock:
+            self._next_market = 0.0 if self.market_provider.configured else float("inf")
+            self._next_calendar = 0.0 if self.calendar.configured else float("inf")
 
     def _marker_path(self) -> Path:
         return self.runtime.data_dir / "automation_feed.json"
@@ -662,6 +677,7 @@ class AutomationService:
             pair=pair,
             strategy=self.strategy_id,
             entry_time=entry_time,
+            dataset_id=dataset_id,
         )
         if not verdict.allowed:
             self._last_auto_status = verdict.note
@@ -796,6 +812,7 @@ class AutomationService:
         if not self.market_provider.configured:
             raise ProviderError("Set ORBIX_TWELVE_DATA_API_KEY on the server before syncing live candles.")
         with self._sync_lock:
+            self._next_market = time.monotonic() + self._next_market_delay()
             if force_activate:
                 self._user_paused = False
                 self._save_marker()
@@ -805,7 +822,6 @@ class AutomationService:
                 return {"status": "paused", "message": message, "candles_added": 0}
             with self.runtime.lock:
                 current_source = self.runtime.source
-                current_pair = self.runtime.pair
                 current_dataset = self.runtime._dataset_id
             if (
                 not force_activate
@@ -889,10 +905,15 @@ class AutomationService:
         try:
             count = self.calendar.refresh()
             with self._state_lock:
+                self._next_calendar = time.monotonic() + self.calendar_refresh_seconds
                 self._last_auto_status = f"Economic calendar refreshed: {count} events cached."
             return {"status": "connected", "events_cached": count}
         except Exception as exc:
             self.calendar.record_refresh_error(str(exc))
+            # Retry a failed calendar soon instead of leaving the news guard
+            # unavailable for the full 15-minute refresh interval.
+            with self._state_lock:
+                self._next_calendar = time.monotonic() + min(60, self.calendar_refresh_seconds)
             raise
 
     def evaluate_news(self, pair: str) -> dict[str, Any]:
@@ -1350,48 +1371,45 @@ class AutomationService:
         self._task = None
 
     async def _run(self) -> None:
-        next_market = 0.0 if self.market_provider.configured else float("inf")
-        next_calendar = 0.0 if self.calendar.configured else float("inf")
-        # Imported datasets are watched even without a provider key. The scan is
-        # a no-op for static historical files and drives streaming appends.
-        next_dataset = time.monotonic() + 5.0 if self.auto_imported else float("inf")
-        # Calibration refit and drift-triggered retraining are checked on a slow
-        # schedule; both are no-ops unless real imported outcomes exist.
-        next_learning = time.monotonic() + 900.0
         while True:
             now = time.monotonic()
+            with self._state_lock:
+                next_market = self._next_market
+                next_calendar = self._next_calendar
+                next_dataset = self._next_dataset
+                next_learning = self._next_learning
             if self.auto_imported and now >= next_dataset:
                 try:
                     await asyncio.to_thread(self._dataset_scan)
                 except Exception:
                     pass
-                next_dataset = time.monotonic() + 30.0
+                self._next_dataset = time.monotonic() + 30.0
             if self.calendar.configured and now >= next_calendar:
                 try:
                     await asyncio.to_thread(self.sync_calendar)
                 except Exception:
                     pass
-                next_calendar = time.monotonic() + self.calendar_refresh_seconds
             if self.market_provider.configured and now >= next_market:
                 try:
                     await asyncio.to_thread(self.sync_market, False)
                 except Exception:
                     pass
-                next_market = time.monotonic() + self._next_market_delay()
             if now >= next_learning:
                 try:
                     await asyncio.to_thread(self.runtime.learning_maintenance)
                 except Exception:
                     pass
-                next_learning = time.monotonic() + 900.0
+                self._next_learning = time.monotonic() + 900.0
             deadlines = [
                 deadline for deadline in (next_market, next_calendar, next_dataset, next_learning)
                 if deadline != float("inf")
             ]
             if not deadlines:
-                await asyncio.sleep(30)
+                await asyncio.sleep(5)
             else:
-                await asyncio.sleep(max(0.5, min(30.0, min(deadlines) - time.monotonic())))
+                # Keep the nap short so a key saved from the browser is picked
+                # up quickly instead of waiting for the next full interval.
+                await asyncio.sleep(max(0.5, min(5.0, min(deadlines) - time.monotonic())))
 
     def status(self) -> dict[str, Any]:
         now = datetime.now(UTC)
@@ -1479,6 +1497,7 @@ class AutomationService:
                     else now
                 ),
                 apply_rules=source != "SYNTHETIC DEMO",
+                dataset_id=dataset_id,
             ),
             "market": {
                 "provider": "Twelve Data",
@@ -1570,6 +1589,18 @@ class AutomationService:
             else "No completed candle is loaded.",
         )
         check(
+            "refresh_cadence",
+            "Feed cadence",
+            False,
+            "ready" if self.refresh_seconds <= self.max_bar_age_seconds else "warning",
+            f"Polls every {self.refresh_seconds}s; a bar older than {self.max_bar_age_seconds}s is treated as stale. "
+            + (
+                "The poll interval fits inside the freshness window."
+                if self.refresh_seconds <= self.max_bar_age_seconds
+                else "The poll interval is longer than the freshness window, so automatic signals will pause between polls."
+            ),
+        )
+        check(
             "calendar",
             "Economic calendar",
             True,
@@ -1642,6 +1673,23 @@ class AutomationService:
             f"Configured for {telegram.get('target_chat')}." if telegram["configured"]
             else "Optional channel delivery is not configured.",
         )
+        auth_enabled = dashboard_credentials() is not None
+        check(
+            "dashboard_auth",
+            "Dashboard authentication",
+            False,
+            "ready" if auth_enabled else "warning",
+            "HTTP Basic authentication is enabled; serve it behind HTTPS."
+            if auth_enabled
+            else "No dashboard password is set. Anyone who can reach this URL can change keys, pause signals, or post to Telegram.",
+        )
+        check(
+            "execution",
+            "Order execution",
+            False,
+            "warning",
+            "Orbix sends no broker orders. Pocket Option has no official public API, so live tickets remain a manual handoff.",
+        )
 
         ready = all(item["status"] == "ready" for item in checks if item["required"])
         shadow = self.runtime.ledger.shadow_summary(dataset_id=self.runtime.dataset_id())
@@ -1650,6 +1698,9 @@ class AutomationService:
             "pair": pair,
             "source": source,
             "ready": ready,
+            "execution_ready": False,
+            "execution_mode": "MANUAL",
+            "dashboard_auth_enabled": auth_enabled,
             "checks": checks,
             "shadow": shadow,
             "dataset_learning": self.runtime.dataset_learning_status(),

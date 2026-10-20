@@ -7,7 +7,7 @@ import random
 from io import StringIO
 from typing import Iterable
 
-from .domain import Candle, parse_datetime
+from .domain import Candle
 
 
 UTC = timezone.utc

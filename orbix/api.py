@@ -8,7 +8,7 @@ import tempfile
 from typing import Callable
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -21,6 +21,7 @@ from .env import load_env
 from .future import build_future_plan
 from .provider_config import ProviderConfigStore
 from .runtime import BACKTEST_WINDOW, Runtime
+from .security import basic_auth_allowed, dashboard_credentials
 from .strategies import strategy_catalog_payload
 from .telegram import TelegramError
 
@@ -58,6 +59,23 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
+
+
+@app.middleware("http")
+async def dashboard_auth(request: Request, call_next):
+    """Optional HTTP Basic auth for every page and API route.
+
+    Disabled unless ORBIX_DASHBOARD_PASSWORD is set, so local installs keep
+    working unchanged. Use it behind HTTPS whenever the dashboard is reachable
+    from another machine.
+    """
+    if not basic_auth_allowed(request.headers.get("authorization")):
+        return Response(
+            status_code=401,
+            content="Authentication required.",
+            headers={"WWW-Authenticate": 'Basic realm="Orbix Signal Lab", charset="UTF-8"'},
+        )
+    return await call_next(request)
 
 
 class SignalRequest(BaseModel):
@@ -164,6 +182,7 @@ def health() -> dict:
             "automatic_signals_active": automation_state["automatic_signals_active"],
             "clock": automation_state.get("clock"),
             "env_file_loaded": ENV_FILE is not None,
+            "dashboard_auth_enabled": dashboard_credentials() is not None,
         }
 
 
@@ -310,9 +329,12 @@ def trader(days: int = 7) -> dict:
             pair=pair,
             reference=reference,
             apply_rules=source != "SYNTHETIC DEMO",
+            dataset_id=dataset_id,
         )
-        reviews = runtime.discipline.reviews(pair=pair, days=days, reference=reference)
-        contexts = runtime.discipline.contexts(pair=pair)
+        reviews = runtime.discipline.reviews(
+            pair=pair, days=days, reference=reference, dataset_id=dataset_id
+        )
+        contexts = runtime.discipline.contexts(pair=pair, dataset_id=dataset_id)
         journal = runtime.ledger.list_engine_events(
             max(20, min(60, days * 10)),
             dataset_id=dataset_id,

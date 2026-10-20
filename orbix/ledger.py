@@ -219,54 +219,74 @@ class PaperLedger:
         return dict(row) if row else None
 
     # ------------------------------------------------------ human-style review
-    def day_signals(self, pair: str, start: datetime, end: datetime) -> list[dict]:
+    def day_signals(
+        self,
+        pair: str,
+        start: datetime,
+        end: datetime,
+        dataset_id: str | None = None,
+    ) -> list[dict]:
         """Signals with an entry inside one UTC trading day, oldest first."""
-        with self._connect() as connection:
-            rows = connection.execute(
-                """SELECT entry_time, strategy, side, status, entry_price, exit_price, outcome
+        query = """SELECT entry_time, strategy, side, status, entry_price, exit_price, outcome
                    FROM signals
                    WHERE pair = ? AND entry_time >= ? AND entry_time < ?
-                     AND entry_time != '' AND source != 'SYNTHETIC DEMO'
-                   ORDER BY entry_time""",
-                (pair.upper(), start.isoformat(), end.isoformat()),
-            ).fetchall()
+                     AND entry_time != '' AND source != 'SYNTHETIC DEMO'"""
+        params: list[str] = [pair.upper(), start.isoformat(), end.isoformat()]
+        if dataset_id is not None:
+            query += " AND dataset_id = ?"
+            params.append(dataset_id)
+        query += " ORDER BY entry_time"
+        with self._connect() as connection:
+            rows = connection.execute(query, params).fetchall()
         return [dict(row) for row in rows]
 
-    def recent_results(self, pair: str, limit: int = 12) -> list[dict]:
+    def recent_results(
+        self,
+        pair: str,
+        limit: int = 12,
+        dataset_id: str | None = None,
+    ) -> list[dict]:
         """Most recent decided outcomes for a pair, oldest first."""
-        with self._connect() as connection:
-            rows = connection.execute(
-                """SELECT entry_time, strategy, side, outcome
+        query = """SELECT entry_time, strategy, side, outcome
                    FROM signals
                    WHERE pair = ? AND status = 'RESOLVED'
                      AND outcome IN ('WIN', 'LOSS') AND entry_time != ''
-                     AND source != 'SYNTHETIC DEMO'
-                   ORDER BY entry_time DESC LIMIT ?""",
-                (pair.upper(), max(1, int(limit))),
-            ).fetchall()
+                     AND source != 'SYNTHETIC DEMO'"""
+        params: list[str] = [pair.upper()]
+        if dataset_id is not None:
+            query += " AND dataset_id = ?"
+            params.append(dataset_id)
+        query += " ORDER BY entry_time DESC LIMIT ?"
+        params.append(max(1, int(limit)))
+        with self._connect() as connection:
+            rows = connection.execute(query, params).fetchall()
         return [dict(row) for row in reversed(rows)]
 
-    def pending_count(self, pair: str) -> int:
+    def pending_count(self, pair: str, dataset_id: str | None = None) -> int:
+        query = """SELECT COUNT(*) AS pending FROM signals
+                   WHERE pair = ? AND status = 'PENDING' AND source != 'SYNTHETIC DEMO'"""
+        params: list[str] = [pair.upper()]
+        if dataset_id is not None:
+            query += " AND dataset_id = ?"
+            params.append(dataset_id)
         with self._connect() as connection:
-            row = connection.execute(
-                """SELECT COUNT(*) AS pending FROM signals
-                   WHERE pair = ? AND status = 'PENDING' AND source != 'SYNTHETIC DEMO'""",
-                (pair.upper(),),
-            ).fetchone()
+            row = connection.execute(query, params).fetchone()
         return int(row["pending"]) if row else 0
 
-    def context_rows(self, pair: str) -> list[dict]:
+    def context_rows(self, pair: str, dataset_id: str | None = None) -> list[dict]:
         """Decided non-synthetic outcomes used for context memory."""
-        with self._connect() as connection:
-            rows = connection.execute(
-                """SELECT strategy, entry_time, outcome
+        query = """SELECT strategy, entry_time, outcome
                    FROM signals
                    WHERE pair = ? AND status = 'RESOLVED'
                      AND outcome IN ('WIN', 'LOSS')
-                     AND source != 'SYNTHETIC DEMO' AND entry_time != ''
-                   ORDER BY entry_time""",
-                (pair.upper(),),
-            ).fetchall()
+                     AND source != 'SYNTHETIC DEMO' AND entry_time != ''"""
+        params: list[str] = [pair.upper()]
+        if dataset_id is not None:
+            query += " AND dataset_id = ?"
+            params.append(dataset_id)
+        query += " ORDER BY entry_time"
+        with self._connect() as connection:
+            rows = connection.execute(query, params).fetchall()
         return [dict(row) for row in rows]
 
     def list_pending(self, pair: str, dataset_id: str) -> list[dict]:

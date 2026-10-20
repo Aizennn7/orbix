@@ -7,7 +7,7 @@ from orbix.backtest import run_walk_forward_backtest
 from orbix.engine import PredictionEngine
 from orbix.features import FEATURE_NAMES, compute_features
 from orbix.market_data import build_demo_candles, parse_candles_csv, validate_candles
-from orbix.model import OnlineLogisticModel, build_training_samples, train_from_candles
+from orbix.model import OnlineLogisticModel, build_training_samples
 from orbix.strategies import STRATEGY_CATALOG, decide, strategy_catalog_payload
 
 

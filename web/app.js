@@ -2163,7 +2163,7 @@ async function loadPreflight() {
     panel.hidden = false;
     const summary = $("#preflightSummary");
     summary.dataset.ready = data.ready ? "true" : "false";
-    summary.textContent = data.ready ? "READY FOR LIVE OPERATION" : "NOT READY FOR LIVE OPERATION";
+    summary.textContent = data.ready ? "SIGNAL PIPELINE READY" : "SIGNAL PIPELINE BLOCKED";
     const list = $("#preflightChecks");
     list.replaceChildren();
     data.checks.forEach((item) => {
@@ -2178,13 +2178,21 @@ async function loadPreflight() {
       detail.textContent = item.detail;
       const badge = document.createElement("span");
       badge.className = "preflight-badge";
-      badge.textContent = item.status === "ready" ? "READY" : item.status === "warning" ? "OPTIONAL" : "BLOCKED";
+      badge.textContent = item.status === "ready" ? "READY" : item.status === "warning" ? "WARNING" : "BLOCKED";
       row.append(dot, label, detail, badge);
       list.append(row);
     });
     const warmup = data.warmup || {};
-    $("#preflightNote").textContent = `${data.note} Warm-up: ${Number(warmup.resolved_outcomes || 0).toLocaleString()} resolved outcomes; calibration starts after ${Number(warmup.calibration_starts_after || 60).toLocaleString()}.`;
-    if (status) status.textContent = data.ready ? "Preflight passed." : "Preflight found blockers; see the checklist.";
+    const execution = data.execution_ready
+      ? "Order execution is available."
+      : "Order execution: manual only — Orbix sends no broker orders.";
+    const auth = data.dashboard_auth_enabled
+      ? "Dashboard authentication is on."
+      : "Dashboard authentication is off — set ORBIX_DASHBOARD_PASSWORD before exposing this URL.";
+    $("#preflightNote").textContent = `${execution} ${auth} ${data.note} Warm-up: ${Number(warmup.resolved_outcomes || 0).toLocaleString()} resolved outcomes; calibration starts after ${Number(warmup.calibration_starts_after || 60).toLocaleString()}.`;
+    if (status) status.textContent = data.ready
+      ? "Signal preflight passed; execution remains manual."
+      : "Preflight found blockers; see the checklist.";
   } catch (error) {
     if (status) status.textContent = `Preflight unavailable: ${error.message}`;
   }
