@@ -64,7 +64,18 @@ jobs:
         run: |
           npm run build || echo "Vite build skipped, manual dist exists"
           ls -lh dist/
-          ls -lh dist/js/ dist/css/
+          ls -lh dist/assets/ || true
+          ls -lh dist/js/ dist/css/ || true
+          # Copy root-level assets after Vite (Vite emptyOutDir deletes them)
+          cp ../web/icon-*.png dist/ 2>/dev/null || true
+          cp ../web/manifest.json dist/ 2>/dev/null || true
+          cp ../web/service-worker.js dist/ 2>/dev/null || true
+          mkdir -p dist/static
+          cp ../web/icon-*.png dist/static/ 2>/dev/null || true
+          cp ../web/manifest.json dist/static/ 2>/dev/null || true
+          cp ../web/mobile.css dist/static/ 2>/dev/null || true
+          cp ../web/laptop.css dist/static/ 2>/dev/null || true
+          ls -lh dist/ | head -n 20
 
       - name: Upload PWA artifact
         uses: actions/upload-artifact@v4
