@@ -66,6 +66,40 @@ def _verify_hash(password: str, encoded: str) -> bool:
     return hmac.compare_digest(actual, expected)
 
 
+def password_hash_error() -> str | None:
+    """Return why ORBIX_DASHBOARD_PASSWORD_HASH is unusable, or None.
+
+    Empty means the plaintext password path (or auth is disabled). A malformed
+    hash otherwise enables auth but makes every login fail, so preflight must
+    report it before a deployment locks itself out.
+    """
+    encoded = os.environ.get(AUTH_HASH_ENV, "").strip()
+    if not encoded:
+        return None
+    try:
+        scheme, iterations_text, salt_text, digest_text = encoded.split("$", 3)
+    except ValueError:
+        return "expected pbkdf2_sha256$<iterations>$<salt>$<digest>"
+    if scheme != "pbkdf2_sha256":
+        return f"unsupported scheme '{scheme}'; use python -m orbix.security"
+    try:
+        iterations = int(iterations_text)
+    except ValueError:
+        return "iterations must be an integer"
+    if iterations < 10_000 or iterations > 5_000_000:
+        return "iterations must be between 10,000 and 5,000,000"
+    try:
+        salt = base64.b64decode(salt_text, validate=True)
+        digest = base64.b64decode(digest_text, validate=True)
+    except (ValueError, binascii.Error):
+        return "salt and digest must be base64"
+    if len(salt) < 8:
+        return "salt is too short"
+    if len(digest) < 16:
+        return "digest is too short"
+    return None
+
+
 def verify_password(candidate: str) -> bool:
     hashed = os.environ.get(AUTH_HASH_ENV, "").strip()
     if hashed:
@@ -88,7 +122,11 @@ def basic_auth_allowed(header: str | None) -> bool:
     if ":" not in decoded:
         return False
     user, password = decoded.split(":", 1)
-    return hmac.compare_digest(user.encode("utf-8"), dashboard_user().encode("utf-8")) and verify_password(password)
+    # Verify both parts so a wrong username takes the same PBKDF2 work as a
+    # wrong password; short-circuiting would leak which usernames exist.
+    user_ok = hmac.compare_digest(user.encode("utf-8"), dashboard_user().encode("utf-8"))
+    password_ok = verify_password(password)
+    return user_ok and password_ok
 
 
 def _main() -> None:

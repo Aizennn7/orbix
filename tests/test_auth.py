@@ -10,11 +10,15 @@ import unittest
 
 from orbix import auth
 from orbix.auth import (
+    BASIC_MAX_FAILURES,
     SESSION_MAX_AGE,
+    basic_attempt_allowed,
+    clear_basic_failures,
     clear_login_failures,
     create_session,
     load_session_secret,
     login_attempt_allowed,
+    record_basic_failure,
     record_login_failure,
     safe_next,
     verify_session,
@@ -165,6 +169,19 @@ class LoginThrottleTests(unittest.TestCase):
             self.assertTrue(login_attempt_allowed(self.IP))
             clear_login_failures(self.IP)
             self.assertTrue(login_attempt_allowed(self.IP))
+
+    def test_basic_auth_has_its_own_higher_limit(self) -> None:
+        now = 1_000_000.0
+        with patch("orbix.auth.time.time", return_value=now):
+            clear_basic_failures(self.IP)
+            for _ in range(BASIC_MAX_FAILURES):
+                self.assertTrue(basic_attempt_allowed(self.IP))
+                record_basic_failure(self.IP)
+            self.assertFalse(basic_attempt_allowed(self.IP))
+            # The browser login form is not locked by a noisy API client.
+            self.assertTrue(login_attempt_allowed(self.IP))
+            clear_basic_failures(self.IP)
+            self.assertTrue(basic_attempt_allowed(self.IP))
 
 
 if __name__ == "__main__":

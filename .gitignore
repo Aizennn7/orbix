@@ -9,3 +9,7 @@ htmlcov/
 
 # Runtime data, uploaded candles, paper outcomes, and fitted models
 /data/
+
+# Login session signing key when a custom data directory is not used
+session_secret
+session_secret.tmp

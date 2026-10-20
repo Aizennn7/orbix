@@ -19,7 +19,7 @@ from .brokers import pocket_option_ticket
 from .domain import Candle, format_datetime, parse_datetime
 from .market_data import parse_candles_csv, validate_candles
 from .runtime import Runtime
-from .security import auth_configured
+from .security import auth_configured, password_hash_error
 from .strategies import EXECUTABLE_STRATEGIES
 from .telegram import TelegramError, TelegramNotifier
 
@@ -1674,12 +1674,15 @@ class AutomationService:
             else "Optional channel delivery is not configured.",
         )
         auth_enabled = auth_configured()
+        auth_error = password_hash_error()
         check(
             "dashboard_auth",
             "Dashboard authentication",
             False,
-            "ready" if auth_enabled else "warning",
-            "The login page and signed session cookies are enabled; serve the dashboard behind HTTPS."
+            "blocked" if auth_error else ("ready" if auth_enabled else "warning"),
+            f"ORBIX_DASHBOARD_PASSWORD_HASH is unusable ({auth_error}); every login will fail. Regenerate it with python -m orbix.security."
+            if auth_error
+            else "The login page and signed session cookies are enabled; serve the dashboard behind HTTPS."
             if auth_enabled
             else "No dashboard password or hash is set. Anyone who can reach this URL can change keys, pause signals, or post to Telegram.",
         )

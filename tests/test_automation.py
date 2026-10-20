@@ -78,6 +78,7 @@ class AutomationTests(unittest.TestCase):
                 "ORBIX_TWELVE_DATA_API_KEY": "",
                 "ORBIX_FINNHUB_API_KEY": "",
                 "ORBIX_DASHBOARD_PASSWORD": "",
+                "ORBIX_DASHBOARD_PASSWORD_HASH": "",
             },
             clear=False,
         ):
@@ -101,6 +102,23 @@ class AutomationTests(unittest.TestCase):
         self.assertEqual(report["warmup"]["resolved_outcomes"], 0)
         self.assertEqual(report["warmup"]["to_calibration"], 60)
         self.assertIn("not a performance forecast", report["note"])
+
+    def test_preflight_flags_an_unusable_password_hash(self) -> None:
+        with tempfile.TemporaryDirectory() as folder, patch.dict(
+            os.environ,
+            {
+                "ORBIX_TWELVE_DATA_API_KEY": "",
+                "ORBIX_FINNHUB_API_KEY": "",
+                "ORBIX_DASHBOARD_PASSWORD": "",
+                "ORBIX_DASHBOARD_PASSWORD_HASH": "not-a-valid-hash",
+            },
+            clear=False,
+        ):
+            report = AutomationService(Runtime(folder)).preflight()
+        checks = {item["id"]: item for item in report["checks"]}
+        self.assertEqual(checks["dashboard_auth"]["status"], "blocked")
+        self.assertIn("unusable", checks["dashboard_auth"]["detail"])
+        self.assertTrue(report["dashboard_auth_enabled"])
 
     def test_calendar_refresh_cannot_outlive_the_news_guard(self) -> None:
         with tempfile.TemporaryDirectory() as folder, patch.dict(

@@ -10,6 +10,7 @@ from orbix.security import (
     basic_auth_allowed,
     dashboard_credentials,
     hash_password,
+    password_hash_error,
     verify_password,
 )
 
@@ -94,6 +95,28 @@ class DashboardAuthTests(unittest.TestCase):
                     clear=False,
                 ):
                     self.assertFalse(verify_password("anything"))
+
+    def test_hash_validation_catches_a_lockout_configuration(self) -> None:
+        with patch.dict(os.environ, {"ORBIX_DASHBOARD_PASSWORD_HASH": ""}, clear=False):
+            self.assertIsNone(password_hash_error())
+        with patch.dict(os.environ, {"ORBIX_DASHBOARD_PASSWORD_HASH": hash_password("valid", iterations=10_000)}, clear=False):
+            self.assertIsNone(password_hash_error())
+        cases = {
+            "plaintext": "expected",
+            "bcrypt$10000$c2FsdA==$ZGlnZXN0": "unsupported",
+            "pbkdf2_sha256$nope$c2FsdA==$ZGlnZXN0": "integer",
+            "pbkdf2_sha256$100$c2FsdA==$ZGlnZXN0": "between",
+            "pbkdf2_sha256$10000$bad!$ZGlnZXN0": "base64",
+            "pbkdf2_sha256$10000$c2FsdA==$bad!": "base64",
+            "pbkdf2_sha256$10000$c2Fs$ZGlnZXN0": "too short",
+            "pbkdf2_sha256$10000$c2FsdA==$ZGln": "too short",
+        }
+        for value, fragment in cases.items():
+            with self.subTest(value=value):
+                with patch.dict(os.environ, {"ORBIX_DASHBOARD_PASSWORD_HASH": value}, clear=False):
+                    error = password_hash_error()
+                    self.assertIsNotNone(error)
+                    self.assertIn(fragment, error)
 
     def test_hash_format_round_trips(self) -> None:
         encoded = hash_password("another secret", iterations=12_000)

@@ -20,10 +20,13 @@ from .auth import (
     CSRF_HEADER,
     SESSION_COOKIE,
     SESSION_MAX_AGE,
+    basic_attempt_allowed,
+    clear_basic_failures,
     clear_login_failures,
     create_session,
     load_session_secret,
     login_attempt_allowed,
+    record_basic_failure,
     record_login_failure,
     safe_next,
     verify_session,
@@ -37,7 +40,7 @@ from .env import load_env
 from .future import build_future_plan
 from .provider_config import ProviderConfigStore
 from .runtime import BACKTEST_WINDOW, Runtime
-from .security import auth_configured, basic_auth_allowed, dashboard_user, verify_password
+from .security import auth_configured, basic_auth_allowed, dashboard_user, password_hash_error, verify_password
 from .strategies import strategy_catalog_payload
 from .telegram import TelegramError
 
@@ -50,6 +53,15 @@ MAX_APPEND_BYTES = 64 * 1024 * 1024
 # Load ORBIX root .env before Runtime or AutomationService read configuration.
 # Real process variables keep precedence, so `uvicorn --env-file` still works.
 ENV_FILE = load_env()
+
+_STARTUP_AUTH_ERROR = password_hash_error() if auth_configured() else None
+if _STARTUP_AUTH_ERROR:
+    # Fail before opening the data store or serving a dashboard nobody can log
+    # in to. A process manager will surface this message in the logs.
+    raise RuntimeError(
+        f"ORBIX_DASHBOARD_PASSWORD_HASH is unusable: {_STARTUP_AUTH_ERROR}. "
+        "Regenerate it with: python -m orbix.security"
+    )
 
 # Created here rather than in runtime.py so importing Runtime (tests, tooling)
 # does not open the live data store or fight a running preview for the lock.
@@ -120,8 +132,19 @@ async def dashboard_auth(request: Request, call_next):
     if path.startswith("/static/") or path in PUBLIC_PATHS:
         return await call_next(request)
     session = _session_payload(request)
-    basic_ok = basic_auth_allowed(request.headers.get("authorization"))
+    client_ip = request.client.host if request.client else "unknown"
+    basic_header = request.headers.get("authorization", "")
+    basic_ok = basic_auth_allowed(basic_header)
+    if basic_ok:
+        clear_basic_failures(client_ip)
     if not session and not basic_ok:
+        if basic_header.lower().startswith("basic "):
+            if not basic_attempt_allowed(client_ip):
+                return JSONResponse(
+                    {"detail": "Too many authentication attempts. Try again later."},
+                    status_code=429,
+                )
+            record_basic_failure(client_ip)
         if path.startswith("/api/") or "application/json" in request.headers.get("accept", ""):
             return JSONResponse({"detail": "Authentication required."}, status_code=401)
         target = request.url.path
@@ -137,6 +160,46 @@ async def dashboard_auth(request: Request, call_next):
     return await call_next(request)
 
 
+SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "Content-Security-Policy": (
+        "default-src 'self'; base-uri 'self'; form-action 'self'; "
+        "object-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
+        "font-src 'self'; connect-src 'self'"
+    ),
+}
+
+
+def _allow_embedding() -> bool:
+    """Preview hosts embed the dashboard; production should keep this off."""
+    return os.getenv("ORBIX_ALLOW_EMBED", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    """Send standards-based hardening headers on every response.
+
+    Added after the auth middleware so its 401/redirect responses are covered
+    too. Dashboard HTML and JSON are never cached; versioned static assets are.
+    Frame denial is removed only when ORBIX_ALLOW_EMBED is explicitly set.
+    """
+    response = await call_next(request)
+    headers = dict(SECURITY_HEADERS)
+    if not _allow_embedding():
+        headers["X-Frame-Options"] = "DENY"
+        headers["Content-Security-Policy"] += "; frame-ancestors 'none'"
+    for name, value in headers.items():
+        response.headers.setdefault(name, value)
+    if request.url.path.startswith("/static/"):
+        response.headers.setdefault("Cache-Control", "public, max-age=3600")
+    else:
+        response.headers.setdefault("Cache-Control", "no-store")
+    return response
+
+
 @app.get("/login", response_class=HTMLResponse)
 def login_form(request: Request, next: str = ""):
     if not auth_configured():
@@ -144,6 +207,12 @@ def login_form(request: Request, next: str = ""):
     target = safe_next(next)
     if _session_payload(request):
         return RedirectResponse(target, status_code=303)
+    config_error = password_hash_error()
+    if config_error:
+        return _login_response(
+            target,
+            f"Server login is misconfigured ({config_error}). Fix ORBIX_DASHBOARD_PASSWORD_HASH and restart.",
+        )
     return _login_response(target)
 
 
@@ -151,6 +220,13 @@ def login_form(request: Request, next: str = ""):
 async def login_submit(request: Request) -> Response:
     if not auth_configured():
         return RedirectResponse("/", status_code=303)
+    config_error = password_hash_error()
+    if config_error:
+        return _login_response(
+            "/",
+            f"Server login is misconfigured ({config_error}). Fix ORBIX_DASHBOARD_PASSWORD_HASH and restart.",
+            503,
+        )
     body = await request.body()
     if len(body) > 4096:
         return _login_response("/", "Login request is too large.", 413)
@@ -161,7 +237,9 @@ async def login_submit(request: Request) -> Response:
     client_ip = request.client.host if request.client else "unknown"
     if not login_attempt_allowed(client_ip):
         return _login_response(next_url, "Too many attempts. Wait a few minutes and try again.", 429)
-    if hmac.compare_digest(username.encode("utf-8"), dashboard_user().encode("utf-8")) and verify_password(password):
+    user_ok = hmac.compare_digest(username.encode("utf-8"), dashboard_user().encode("utf-8"))
+    password_ok = verify_password(password)
+    if user_ok and password_ok:
         clear_login_failures(client_ip)
         secret = SESSION_SECRET or load_session_secret(runtime.data_dir)
         token, _ = create_session(dashboard_user(), secret)
@@ -317,6 +395,7 @@ def health() -> dict:
             "clock": automation_state.get("clock"),
             "env_file_loaded": ENV_FILE is not None,
             "dashboard_auth_enabled": auth_configured(),
+            "dashboard_auth_error": password_hash_error(),
         }
 
 

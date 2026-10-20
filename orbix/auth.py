@@ -21,6 +21,7 @@ SESSION_SECRET_FILE = "session_secret"
 
 LOGIN_WINDOW_SECONDS = 600
 LOGIN_MAX_FAILURES = 5
+BASIC_MAX_FAILURES = 20
 
 _failure_lock = threading.Lock()
 _failures: dict[str, list[float]] = {}
@@ -130,28 +131,59 @@ def safe_next(value: str | None) -> str:
     return text
 
 
-def _prune(ip: str, now: float | None = None) -> list[float]:
+def _bucket(kind: str, ip: str) -> str:
+    # Login-form and Basic-auth failures have separate limits so a script with
+    # a stale password cannot lock the browser form out, and vice versa.
+    return f"{kind}:{ip}"
+
+
+def _prune(key: str, now: float | None = None) -> list[float]:
     moment = time.time() if now is None else now
-    recent = [stamp for stamp in _failures.get(ip, []) if moment - stamp < LOGIN_WINDOW_SECONDS]
+    recent = [stamp for stamp in _failures.get(key, []) if moment - stamp < LOGIN_WINDOW_SECONDS]
     if recent:
-        _failures[ip] = recent
+        _failures[key] = recent
     else:
-        _failures.pop(ip, None)
+        _failures.pop(key, None)
     return recent
 
 
-def login_attempt_allowed(ip: str) -> bool:
+def _allowed(kind: str, ip: str, limit: int) -> bool:
     with _failure_lock:
-        return len(_prune(ip)) < LOGIN_MAX_FAILURES
+        return len(_prune(_bucket(kind, ip))) < limit
+
+
+def _record(kind: str, ip: str) -> None:
+    key = _bucket(kind, ip)
+    with _failure_lock:
+        recent = _prune(key)
+        recent.append(time.time())
+        _failures[key] = recent
+
+
+def _clear(kind: str, ip: str) -> None:
+    with _failure_lock:
+        _failures.pop(_bucket(kind, ip), None)
+
+
+def login_attempt_allowed(ip: str) -> bool:
+    return _allowed("login", ip, LOGIN_MAX_FAILURES)
 
 
 def record_login_failure(ip: str) -> None:
-    with _failure_lock:
-        recent = _prune(ip)
-        recent.append(time.time())
-        _failures[ip] = recent
+    _record("login", ip)
 
 
 def clear_login_failures(ip: str) -> None:
-    with _failure_lock:
-        _failures.pop(ip, None)
+    _clear("login", ip)
+
+
+def basic_attempt_allowed(ip: str) -> bool:
+    return _allowed("basic", ip, BASIC_MAX_FAILURES)
+
+
+def record_basic_failure(ip: str) -> None:
+    _record("basic", ip)
+
+
+def clear_basic_failures(ip: str) -> None:
+    _clear("basic", ip)
