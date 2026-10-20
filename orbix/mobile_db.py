@@ -14,6 +14,15 @@ from typing import List, Optional
 
 from .domain import Candle, parse_datetime
 
+# Root level database config - single source of truth
+try:
+    from database import get_database_config
+    _root_config = get_database_config()
+    print(f"[MobileDB] Using root config: { _root_config.data_dir} backend={_root_config.effective_backend.value}")
+except Exception as e:
+    _root_config = None
+    print(f"[MobileDB] Root config not available: {e}, using local")
+
 
 class MobileCandleStore:
     """SQLite-backed candle store for mobile APK - offline first"""

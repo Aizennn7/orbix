@@ -15,6 +15,23 @@ from fastapi.staticfiles import StaticFiles
 
 from .mobile_db import get_mobile_store
 
+# Root level database config - single source of truth
+try:
+    from database import get_database_config, get_config
+    _root_db_config = get_database_config()
+    print(f"[MobileAPI] Root DB config: backend={_root_db_config.effective_backend.value} data_dir={_root_db_config.data_dir}")
+except Exception as e:
+    _root_db_config = None
+    print(f"[MobileAPI] Root config not available: {e}")
+
+# Also try orbix.database re-export
+try:
+    from orbix.database import get_database_config as _get_cfg2
+    if _root_db_config is None:
+        _root_db_config = _get_cfg2()
+except Exception:
+    pass
+
 # Mobile app instance - lightweight, no heavy dependencies
 mobile_app = FastAPI(title="Orbix Mobile - Offline", version="0.4.0-mobile")
 

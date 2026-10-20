@@ -272,6 +272,18 @@ class OrbixMobileApp {
     const datasets = await db.getDatasets();
     const info = await db.getStorageInfo();
     
+    // Fetch root-level database config from API if available
+    let rootConfig = null;
+    try {
+      const res = await fetch('/api/database/config');
+      if (res.ok) {
+        const data = await res.json();
+        rootConfig = data.config;
+      }
+    } catch (e) {
+      console.log('[Orbix Mobile] Root DB config not available offline, using local');
+    }
+    
     document.getElementById('datasetCount').textContent = `${datasets.length} datasets`;
     document.getElementById('datasetList').innerHTML = datasets.map(d => `
       <div style="padding:10px;border:1px solid var(--line);border-radius:8px;margin:6px 0;">
@@ -280,14 +292,28 @@ class OrbixMobileApp {
       </div>
     `).join('') || 'No datasets';
     
+    const rootInfo = rootConfig ? `
+      <div style="margin-top:8px;padding:8px;background:rgba(100,150,255,.1);border:1px solid rgba(100,150,255,.2);border-radius:6px;">
+        <div style="font-size:8px;font-weight:600;color:#8ab4ff;">ROOT LEVEL DATABASE CONFIG</div>
+        <div style="font-size:7px;margin-top:4px;color:var(--muted);">
+          Backend: ${rootConfig.backend} (configured: ${rootConfig.configured_backend})<br>
+          Data dir: ${rootConfig.data_dir}<br>
+          Location: database/ at root — single source of truth<br>
+          ${rootConfig.supabase_configured ? '✓ Supabase cloud sync ready' : '○ Local only (SQLite/DuckDB)'}
+        </div>
+      </div>
+    ` : '';
+
     document.getElementById('storageInfo').innerHTML = `
       <div style="display:grid;gap:6px;font-size:9px;">
         <div>DB Type: <strong>${info.dbType}</strong></div>
         <div>Datasets: ${info.datasets} • Candles: ${info.candles} • Signals: ${info.signals}</div>
         <div>Est. Size: ${info.estimatedSize}</div>
         <div style="margin-top:8px;padding:8px;background:rgba(74,222,128,.1);border:1px solid rgba(74,222,128,.2);border-radius:6px;color:#4ade80;">
-          ✓ All Orbix data lives inside APK — offline, no server needed
+          ✓ All Orbix data lives inside APK — offline, no server needed<br>
+          ✓ Database configured at root level: database/ + data/ + .env
         </div>
+        ${rootInfo}
       </div>
     `;
   }

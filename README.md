@@ -109,9 +109,50 @@ PORT=10000 ORBIX_DATA_DIR=/var/lib/orbix bash startup.sh
 
 Point the platform's health check at `/healthz` and keep the data directory on a real disk.
 
+### Database — Root Level Configuration (NEW)
+
+**All database config at root level — single source of truth for web, mobile, laptop, APK**
+
+```
+orbix/ (root)
+├── database/              # <-- ROOT LEVEL DATABASE CONFIG
+│   ├── config.py          # Central config - reads .env at root
+│   ├── connection.py      # Connection factory - auto backend
+│   ├── schema.sql         # Postgres/Supabase schema
+│   ├── sqlite_schema.sql  # SQLite schema (mobile, offline)
+│   └── README.md
+├── data/                  # <-- ROOT LEVEL DATA
+│   ├── orbix.sqlite3      # SQLite ledger
+│   ├── candles.duckdb     # DuckDB candles
+│   └── mobile/            # APK data - all inside
+├── .env                   # DATABASE_BACKEND, DATABASE_URL, SUPABASE_URL at root
+└── DATABASE.md            # Full guide
+```
+
+Configure at root `.env`:
+```bash
+DATABASE_BACKEND=auto              # auto, sqlite, duckdb, postgres, supabase
+ORBIX_DATA_DIR=./data              # root data dir
+DATABASE_URL=postgres://...        # optional Postgres
+SUPABASE_URL=https://xxx.supabase.co  # optional cloud sync for APK
+```
+
+Usage:
+```python
+from database import get_database_config, get_candle_store, get_ledger
+config = get_database_config()  # reads root .env
+store = get_candle_store()      # auto backend
+```
+
+APIs: `GET /api/database/config`, `/api/database/health`, `/api/storage` now includes `database_config`.
+
+Init: `python scripts/init_db.py --check` or `python scripts/init_db.py`
+
+See `DATABASE.md` and `database/README.md` for full guide.
+
 ### Mobile & Laptop — All Orbix inside APK
 
-**New in 0.4.0-mobile: Full offline APK with database, works 24/7 on your device**
+**New in 0.4.0-mobile: Full offline APK with database at root level, works 24/7 on your device**
 
 Orbix now ships as:
 - **Mobile APK** (`mobile/`): Capacitor + Chaquopy Python, SQLite inside APK, 5 strategies JS port, offline-first, WorkManager 15min + BootReceiver for 24/7
