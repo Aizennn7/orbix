@@ -62,11 +62,12 @@ Liquidity ordering in the Future page uses the BIS Triennial Central Bank Survey
 - **Calibration refit.** The isotonic mapping is refitted from stored resolved outcomes every `ORBIX_RECALIBRATE_EVERY` accepted updates (default 50) and whenever an existing mapping has drifted. With 140 or more stored outcomes the fit uses the older 70% and must not worsen either Brier score or expected calibration error on the newer 30%; otherwise the previous mapping is kept. A fit that collapses to a single level is stored and reported as flat, and the gate abstains until the score regains rank structure. Demo outcomes are never used.
 - **Promotion and rollback.** Retraining fits a challenger on the older 85% of imported candles and validates it on the most recent 15%. The challenger replaces the champion only if held-out log loss improves and Brier score does not worsen. Each promoted snapshot is versioned under `data/models/`; the last 12 are kept. `POST /api/model/rollback` restores the previous snapshot. The comparison is deliberately conservative because the champion may already have learned from some recent bars online.
 - **Scheduled maintenance.** The background loop checks calibration and drift every 15 minutes while imported data is active. An automatic retrain is attempted only after drift plus at least 100 newly resolved outcomes, and still passes through the same validation gate.
+- **Live preflight.** `GET /api/preflight` checks the market-provider key, active dataset, bar freshness, calendar connection, news guard, scheduler switch, champion model, calibration state, and optional Telegram delivery. It also reports how many resolved outcomes are still needed before online updates and calibration begin. Readiness is a configuration check, not a performance forecast; on synthetic demo data it is expected to report blockers.
 - **No fabricated accuracy.** These metrics describe recorded paper outcomes. They do not include spread, payout, or execution, and they cannot establish a future win rate.
 
 ## Data, tests, and API
 
-Candle history and auto-resolved paper outcomes are stored locally in DuckDB/SQLite under ignored `data/`. Keep one Uvicorn worker because this is a single-process local store. CSV upload accepts `timestamp`/`datetime`, `open`, `high`, `low`, `close`, and optional `volume`; use UTC candle-open timestamps and at least 120 ordered candles. Earlier imported datasets are archived when another dataset is activated.
+Candle history and auto-resolved paper outcomes are stored locally in DuckDB/SQLite under ignored `data/` by default; set `ORBIX_DATA_DIR` to use another location. Keep one Uvicorn worker because this is a single-process local store. CSV upload accepts `timestamp`/`datetime`, `open`, `high`, `low`, `close`, and optional `volume`; use UTC candle-open timestamps and at least 120 ordered candles. Earlier imported datasets are archived when another dataset is activated.
 
 Walk-forward tests train on earlier data and test on later data; automatic UI reruns happen after import/reactivation and pair/strategy/payout changes, then after each 50 additional closed feed bars to avoid running a full walk-forward job every minute. Manual rerun remains available. Synthetic candles are excluded from automatic accuracy reporting.
 
@@ -79,6 +80,7 @@ Useful endpoints:
 - `GET /api/health`, `/api/storage`, `/api/learning`, `/api/automation/status`
 - `GET /api/model?pair=EUR/USD` (calibration, drift, contributions, versions, per-strategy record)
 - `POST /api/model/retrain`, `/api/model/rollback`, `/api/model/maintenance`
+- `GET /api/preflight` (provider, calendar, model, calibration and delivery readiness)
 - `GET /api/market?pair=EUR/USD`, `/api/strategies`, `/api/signals`
 - `POST /api/automation/sync` and `/api/automation/calendar/refresh`
 - `POST /api/signal` and `/api/backtest`

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -68,6 +69,26 @@ class AutomationTests(unittest.TestCase):
             self.assertEqual(status["calendar"]["guard"]["status"], "UNAVAILABLE")
             self.assertFalse(status["market"]["connected"])
             self.assertFalse(status["market"]["active_dataset_is_provider"])
+
+    def test_preflight_lists_blockers_and_warmup(self) -> None:
+        with tempfile.TemporaryDirectory() as folder, patch.dict(
+            os.environ,
+            {"ORBIX_TWELVE_DATA_API_KEY": "", "ORBIX_FINNHUB_API_KEY": ""},
+            clear=False,
+        ):
+            runtime = Runtime(folder)
+            service = AutomationService(runtime)
+            report = service.preflight()
+        self.assertFalse(report["ready"])
+        checks = {item["id"]: item for item in report["checks"]}
+        self.assertEqual(checks["market_provider"]["status"], "blocked")
+        self.assertEqual(checks["calendar"]["status"], "blocked")
+        self.assertEqual(checks["scheduler"]["status"], "ready")
+        self.assertEqual(checks["telegram"]["status"], "warning")
+        self.assertFalse(checks["telegram"]["required"])
+        self.assertEqual(report["warmup"]["resolved_outcomes"], 0)
+        self.assertEqual(report["warmup"]["to_calibration"], 60)
+        self.assertIn("not a performance forecast", report["note"])
 
     def test_datetime_header_is_accepted_by_candle_store_ingestion(self) -> None:
         with tempfile.TemporaryDirectory() as folder:

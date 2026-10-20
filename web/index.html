@@ -225,7 +225,13 @@
           <button class="button button-secondary" id="refreshModel" type="button">REFRESH</button>
           <button class="button button-secondary" id="retrainModel" type="button">RETRAIN + VALIDATE</button>
           <button class="button button-secondary" id="rollbackModel" type="button">ROLL BACK ONE VERSION</button>
+          <button class="button button-secondary" id="preflightModel" type="button">LIVE PREFLIGHT</button>
           <span id="modelActionStatus" class="model-action-status"></span>
+        </div>
+        <div class="preflight-panel" id="preflightPanel" hidden>
+          <div id="preflightSummary" class="preflight-summary"></div>
+          <div id="preflightChecks"></div>
+          <p class="micro-copy" id="preflightNote"></p>
         </div>
         <p class="micro-copy" id="modelLabNote">A held-out validation gate decides whether a retrained model replaces the champion. Calibration is refitted only from resolved imported-data outcomes; demo outcomes never train it.</p>
       </article>

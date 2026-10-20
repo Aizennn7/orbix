@@ -1206,3 +1206,149 @@ class AutomationService:
                 "news_blackout_after_minutes": int(self.calendar.blackout_after.total_seconds() // 60),
             },
         }
+
+    def preflight(self) -> dict[str, Any]:
+        """Configuration and warm-up checks for live operation.
+
+        This says whether the pieces are wired and how much real evidence has
+        accumulated. It is deliberately not an accuracy estimate.
+        """
+        state = self.status()
+        market = state["market"]
+        calendar = state["calendar"]
+        telegram = state["telegram"]
+        guard = calendar["guard"]
+        with self.runtime.lock:
+            pair = self.runtime.pair
+            source = self.runtime.source
+            model = self.runtime.champion_model(pair)
+            settings = dict(self.runtime.settings)
+        try:
+            resolved = int(self.runtime.ledger.learning_summary().get("resolved_outcomes_seen") or 0)
+        except Exception:
+            resolved = 0
+        update_starts = int(settings.get("min_learning_samples", 30))
+        calibration_starts = 60
+        checks: list[dict[str, Any]] = []
+
+        def check(identifier: str, label: str, required: bool, status: str, detail: str) -> None:
+            checks.append({
+                "id": identifier,
+                "label": label,
+                "required": required,
+                "status": status,
+                "detail": detail,
+            })
+
+        check(
+            "market_provider",
+            "Market provider",
+            True,
+            "ready" if market["configured"] else "blocked",
+            "Twelve Data key is configured." if market["configured"]
+            else "No Twelve Data key configured; only imported CSV history can drive signals.",
+        )
+        check(
+            "provider_dataset",
+            "Active provider dataset",
+            True,
+            "ready" if market["active_dataset_is_provider"] else "blocked",
+            "The active candle dataset came from the provider feed." if market["active_dataset_is_provider"]
+            else f"The active dataset is {source}, not the provider feed.",
+        )
+        age = market.get("latest_bar_age_seconds")
+        check(
+            "freshness",
+            "Latest completed bar",
+            True,
+            "ready" if market["data_fresh"] else "blocked",
+            f"Latest bar is {age:.0f}s old (limit {market['max_bar_age_seconds']}s)." if age is not None
+            else "No completed candle is loaded.",
+        )
+        check(
+            "calendar",
+            "Economic calendar",
+            True,
+            "ready" if calendar["connected"] else "blocked",
+            calendar.get("last_error") or (
+                "Calendar is connected." if calendar["connected"]
+                else "No Finnhub calendar key configured; news risk cannot be cleared."
+            ),
+        )
+        check(
+            "news_guard",
+            "News guard",
+            True,
+            "ready" if guard["status"] == "CLEAR" else "blocked",
+            guard["message"] if guard.get("message") else f"Guard status: {guard['status']}.",
+        )
+        check(
+            "scheduler",
+            "Automatic signals",
+            True,
+            "ready" if self.auto_signals_enabled else "blocked",
+            "Automatic signals are enabled." if self.auto_signals_enabled
+            else "ORBIX_AUTO_SIGNALS is false.",
+        )
+        model_ready = bool(model is not None and model.trained)
+        check(
+            "model",
+            "Champion model",
+            True,
+            "ready" if model_ready else "blocked",
+            f"Feature set v{model.feature_version}, {model.training_samples:,} training rows." if model_ready
+            else "No trained champion yet. Import history, then retrain or generate a signal.",
+        )
+        if model_ready and model.calibrator.fitted and not model.calibrator.flat:
+            calibration_status = "ready"
+            calibration_detail = (
+                f"Isotonic map with {model.calibrator.levels} levels from "
+                f"{model.calibrator.samples:,} resolved outcomes."
+            )
+        elif model_ready and model.calibrator.flat:
+            calibration_status = "blocked"
+            calibration_detail = (
+                "Calibration collapsed to one level: the score has no usable rank signal, "
+                "so the gate abstains. More varied real outcomes are needed."
+            )
+        else:
+            calibration_status = "warning"
+            remaining = max(0, calibration_starts - resolved)
+            calibration_detail = (
+                f"Raw probabilities. {resolved:,} of {calibration_starts} resolved outcomes needed "
+                f"for a calibration fit ({remaining:,} to go)."
+            )
+        check("calibration", "Probability calibration", False, calibration_status, calibration_detail)
+        check(
+            "telegram",
+            "Telegram delivery",
+            False,
+            "ready" if telegram["configured"] else "warning",
+            f"Configured for {telegram.get('target_chat')}." if telegram["configured"]
+            else "Optional channel delivery is not configured.",
+        )
+
+        ready = all(item["status"] == "ready" for item in checks if item["required"])
+        return {
+            "generated_at": format_datetime(datetime.now(UTC)),
+            "pair": pair,
+            "source": source,
+            "ready": ready,
+            "checks": checks,
+            "warmup": {
+                "resolved_outcomes": resolved,
+                "updates_start_after": update_starts,
+                "calibration_starts_after": calibration_starts,
+                "to_updates": max(0, update_starts - resolved),
+                "to_calibration": max(0, calibration_starts - resolved),
+                "calibration_state": (
+                    "flat" if model_ready and model.calibrator.flat
+                    else "fitted" if model_ready and model.calibrator.fitted
+                    else "raw"
+                ),
+            },
+            "note": (
+                "Preflight checks configuration and warm-up only. Readiness is not a "
+                "performance forecast, and calibration describes past outcomes."
+            ),
+        }

@@ -1646,6 +1646,42 @@ function renderModelCard(data) {
   $("#modelLabNote").textContent = (data.note || "Probabilities describe recorded evidence, not future certainty.") + recordText;
 }
 
+async function loadPreflight() {
+  const panel = $("#preflightPanel");
+  const status = $("#modelActionStatus");
+  if (status) status.textContent = "Checking provider, calendar, model and delivery…";
+  try {
+    const data = await api("/api/preflight");
+    panel.hidden = false;
+    const summary = $("#preflightSummary");
+    summary.dataset.ready = data.ready ? "true" : "false";
+    summary.textContent = data.ready ? "READY FOR LIVE OPERATION" : "NOT READY FOR LIVE OPERATION";
+    const list = $("#preflightChecks");
+    list.replaceChildren();
+    data.checks.forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "preflight-check";
+      row.dataset.status = item.status;
+      const dot = document.createElement("i");
+      dot.className = "preflight-dot";
+      const label = document.createElement("strong");
+      label.textContent = item.label;
+      const detail = document.createElement("span");
+      detail.textContent = item.detail;
+      const badge = document.createElement("span");
+      badge.className = "preflight-badge";
+      badge.textContent = item.status === "ready" ? "READY" : item.status === "warning" ? "OPTIONAL" : "BLOCKED";
+      row.append(dot, label, detail, badge);
+      list.append(row);
+    });
+    const warmup = data.warmup || {};
+    $("#preflightNote").textContent = `${data.note} Warm-up: ${Number(warmup.resolved_outcomes || 0).toLocaleString()} resolved outcomes; calibration starts after ${Number(warmup.calibration_starts_after || 60).toLocaleString()}.`;
+    if (status) status.textContent = data.ready ? "Preflight passed." : "Preflight found blockers; see the checklist.";
+  } catch (error) {
+    if (status) status.textContent = `Preflight unavailable: ${error.message}`;
+  }
+}
+
 async function loadModelCard() {
   const status = $("#modelActionStatus");
   try {
@@ -1689,6 +1725,7 @@ async function runModelAction(path, confirmation, busyLabel) {
 function wireEvents() {
   $("#generateButton").addEventListener("click", generateSignal);
   $("#refreshModel").addEventListener("click", loadModelCard);
+  $("#preflightModel").addEventListener("click", loadPreflight);
   $("#retrainModel").addEventListener("click", () => runModelAction(
     `/api/model/retrain?pair=${encodeURIComponent($("#pairSelect").value || "EUR/USD")}`,
     "Retrain a challenger and replace the champion only if it wins on held-out candles?",

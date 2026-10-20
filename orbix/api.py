@@ -198,6 +198,11 @@ def automation_status() -> dict:
     return automation.status()
 
 
+@app.get("/api/preflight")
+def preflight_status() -> dict:
+    return automation.preflight()
+
+
 @app.post("/api/automation/sync")
 async def sync_live_feed() -> dict:
     try:
