@@ -995,8 +995,10 @@ function renderProviderStatus(summary = "") {
     if (noteNode) {
       if (!provider) {
         noteNode.textContent = card.fallback;
+      } else if (!provider.configured) {
+        noteNode.textContent = provider.message;
       } else {
-        const source = provider.source === "environment" ? "server environment" : provider.source === "web" ? "saved on this server" : "not saved";
+        const source = provider.source === "environment" ? "server environment" : "saved on this server";
         const checked = provider.checked_at ? ` · last test ${compactTime(provider.checked_at)}` : "";
         noteNode.textContent = `${provider.message}${provider.masked ? ` · ${provider.masked}` : ""} · ${source}${checked}`;
       }

@@ -185,6 +185,8 @@ class ProviderConfigStore:
                     "message": str(result.get("message") or "")[:300],
                     "checked_at": now,
                 }
+            if not self._keys and not self._tests:
+                return
             self._updated_at = now
             self._write()
 

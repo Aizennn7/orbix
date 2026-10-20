@@ -94,6 +94,12 @@ class ProviderConfigStoreTests(unittest.TestCase):
             self.assertTrue((Path(folder) / target).is_file())
         self.assertEqual(ProviderConfigStore(Path(folder) / "unused").path.name, "provider_settings.json")
 
+    def test_empty_test_results_do_not_create_a_file(self) -> None:
+        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, EMPTY_KEYS, clear=False):
+            store = ProviderConfigStore(folder)
+            store.record_tests({"market": {"accessible": None, "message": ""}})
+            self.assertFalse((Path(folder) / "provider_settings.json").exists())
+
     def test_key_input_is_bounded(self) -> None:
         with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, EMPTY_KEYS, clear=False):
             store = ProviderConfigStore(folder)
