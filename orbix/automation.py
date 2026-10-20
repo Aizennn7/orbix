@@ -15,6 +15,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from .brokers import pocket_option_ticket
 from .domain import Candle, format_datetime, parse_datetime
 from .market_data import parse_candles_csv, validate_candles
 from .runtime import Runtime
@@ -597,6 +598,7 @@ class AutomationService:
                 signal["discipline"] = trade
                 self._journal(trade["note"], pair, entry_time)
             signal["heading"] = f"{strategy_name} · {signal['side']}"
+            signal["broker_ticket"] = pocket_option_ticket(signal)
             signal["automatic"] = True
             signal["automation_generated_at"] = format_datetime(now)
             signal["news_guard"] = guard
@@ -1343,7 +1345,22 @@ class AutomationService:
             and source == "IMPORTED CSV"
             and not provider_dataset_active
         )
-        paper_active = bool(paper_enabled and latest is not None)
+        paper_fresh = bool(paper_enabled and market_data_fresh)
+        paper_active = paper_fresh
+        paper_waiting = bool(paper_enabled and not paper_fresh)
+        if paper_waiting:
+            paper_note = (
+                "The imported dataset is historical "
+                f"(latest bar {format_datetime(latest.timestamp) if latest is not None else 'none'}); "
+                "the paper loop is watching for a newly appended fresh bar and is not generating trades."
+            )
+        elif paper_enabled:
+            paper_note = (
+                "Imported datasets are watched for newly appended fresh bars. Signals are paper-only, "
+                "the news guard is recorded but not required, and Telegram auto-posting is disabled."
+            )
+        else:
+            paper_note = None
         return {
             "server_time": format_datetime(now),
             "pair": self.market_pair,
@@ -1351,13 +1368,11 @@ class AutomationService:
             "auto_signals_enabled": self.auto_signals_enabled,
             "auto_imported": self.auto_imported,
             "automatic_signals_active": bool(market_ready and news_ready and self.auto_signals_enabled),
+            "clock": self.runtime.clock(),
             "paper_automation_enabled": paper_enabled,
             "paper_automation_active": paper_active,
-            "paper_automation_note": (
-                "Imported datasets are watched for newly appended fresh bars. Signals are paper-only, "
-                "the news guard is recorded but not required, and Telegram auto-posting is disabled."
-                if paper_enabled else None
-            ),
+            "paper_automation_waiting": paper_waiting,
+            "paper_automation_note": paper_note,
             "latest_imported_bar": latest.to_dict() if (latest and paper_enabled) else None,
             "imported_bar_age_seconds": latest_bar_age_seconds if paper_enabled else None,
             "imported_max_entry_delay_seconds": self.imported_max_entry_delay,

@@ -446,7 +446,7 @@ class CandleStore:
             size = self.database.stat().st_size if self.database.exists() else 0
             return {
                 "engine": "DuckDB",
-                "path": "data/candles.duckdb",
+                "path": str(self.database),
                 "datasets_archived": int(row[0]),
                 "candles_archived": int(row[1]),
                 "active_dataset_id": active["dataset_id"] if active else None,

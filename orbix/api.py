@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import tempfile
 from typing import Callable
@@ -14,6 +13,8 @@ from pydantic import BaseModel, Field
 
 from .automation import AutomationService, ProviderError
 from .backtest import run_walk_forward_backtest
+from .brokers import capabilities as broker_capabilities
+from .brokers import pocket_option_ticket
 from .domain import parse_datetime
 from .future import build_future_plan
 from .runtime import BACKTEST_WINDOW, Runtime
@@ -145,6 +146,7 @@ def health() -> dict:
             "archived_candles": storage["candles_archived"],
             "online_learning_updates": runtime.ledger.learning_summary()["online_updates"],
             "automatic_signals_active": automation_state["automatic_signals_active"],
+            "clock": automation_state.get("clock"),
         }
 
 
@@ -212,16 +214,12 @@ def trader(days: int = 7) -> dict:
     This describes what the automatic path would do, not a forecast. The rules
     can only reduce activity; they cannot create an edge.
     """
+    clock = runtime.clock()
+    reference = parse_datetime(clock["reference"])
     with runtime.lock:
         pair = runtime.pair
         source = runtime.source
         dataset_id = runtime.dataset_id()
-        latest = runtime.candles[-1] if runtime.candles else None
-        reference = (
-            latest.timestamp + timedelta(minutes=1)
-            if source == "IMPORTED CSV" and latest is not None
-            else datetime.now(timezone.utc)
-        )
         status = runtime.discipline.status(
             pair=pair,
             reference=reference,
@@ -239,6 +237,7 @@ def trader(days: int = 7) -> dict:
         "source": source,
         "dataset_id": dataset_id,
         "reference": reference.isoformat(),
+        "clock": clock,
         "status": status,
         "reviews": reviews,
         "contexts": contexts,
@@ -338,7 +337,9 @@ def future_plan(pair: str | None = None, count: int = 6) -> dict:
                 ),
             )
     try:
-        return build_future_plan(runtime, automation, count=count)
+        return build_future_plan(
+            runtime, automation, count=count, now=parse_datetime(runtime.clock()["reference"])
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -389,6 +390,12 @@ def strategies() -> dict:
     return strategy_catalog_payload()
 
 
+@app.get("/api/broker")
+def broker_status() -> dict:
+    """Broker handoff capabilities, including what is deliberately not wired."""
+    return broker_capabilities()
+
+
 @app.post("/api/signals/scan")
 def scan_signals(payload: ScanRequest) -> dict:
     """Test every executable strategy on the same closed candle.
@@ -397,6 +404,7 @@ def scan_signals(payload: ScanRequest) -> dict:
     signal from the strictest qualified method, never one per strategy.
     """
     pair = payload.pair.upper().strip()
+    clock = runtime.clock()
     guard = automation.evaluate_news(pair)
     safety_reason = guard["message"] if guard["status"] == "BLACKOUT" else None
     market_status = automation.status()["market"]
@@ -409,7 +417,7 @@ def scan_signals(payload: ScanRequest) -> dict:
         scan = runtime.scan_strategies(
             pair,
             payload.horizon,
-            generated_at=datetime.now(timezone.utc),
+            generated_at=parse_datetime(clock["reference"]),
             is_live=is_live,
             safety_filter_reason=safety_reason,
         )
@@ -417,6 +425,7 @@ def scan_signals(payload: ScanRequest) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     scan["news_guard"] = guard
     scan["automatic"] = False
+    scan["clock"] = clock
     scan["recorded"] = None
     best = scan.get("best")
     if payload.record and best is not None:
@@ -438,6 +447,7 @@ def scan_signals(payload: ScanRequest) -> dict:
                 "already_recorded": True,
                 "news_guard": guard,
                 "automatic": False,
+                "broker_ticket": pocket_option_ticket(best),
             }
         else:
             try:
@@ -445,7 +455,7 @@ def scan_signals(payload: ScanRequest) -> dict:
                     pair,
                     best["strategy"],
                     payload.horizon,
-                    generated_at=datetime.now(timezone.utc),
+                    generated_at=parse_datetime(clock["reference"]),
                     is_live=is_live,
                     safety_filter_reason=safety_reason,
                 )
@@ -456,12 +466,15 @@ def scan_signals(payload: ScanRequest) -> dict:
                 recorded["already_recorded"] = False
                 recorded["news_guard"] = guard
                 recorded["automatic"] = False
+                recorded["clock"] = clock
+                recorded["broker_ticket"] = pocket_option_ticket(recorded)
                 scan["recorded"] = recorded
     return scan
 
 
 @app.post("/api/signal")
 def generate_signal(payload: SignalRequest) -> dict:
+    clock = runtime.clock()
     guard = automation.evaluate_news(payload.pair.upper().strip())
     safety_reason = guard["message"] if guard["status"] == "BLACKOUT" else None
     market_status = automation.status()["market"]
@@ -470,7 +483,7 @@ def generate_signal(payload: SignalRequest) -> dict:
             payload.pair,
             payload.strategy,
             payload.horizon,
-            generated_at=datetime.now(timezone.utc),
+            generated_at=parse_datetime(clock["reference"]),
             is_live=bool(
                 market_status["connected"]
                 and market_status["active_dataset_is_provider"]
@@ -482,6 +495,8 @@ def generate_signal(payload: SignalRequest) -> dict:
         signal["heading"] = f"{strategy_names.get(payload.strategy, payload.strategy)} · {signal['side']}"
         signal["news_guard"] = guard
         signal["automatic"] = False
+        signal["clock"] = clock
+        signal["broker_ticket"] = pocket_option_ticket(signal)
         return signal
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

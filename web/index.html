@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#050505">
   <title>Dashboard — Orbix Signal Lab</title>
-  <link rel="stylesheet" href="/static/styles.css?v=20">
+  <link rel="stylesheet" href="/static/styles.css?v=21">
 </head>
 <body>
   <div class="noise" aria-hidden="true"></div>
@@ -61,6 +61,15 @@
         <a class="credit-manage-link" id="creditManageConnection" href="#connections" data-route="connections">MANAGE API KEYS ↗</a>
       </section>
     </div>
+  </section>
+
+  <section class="clock-strip shell" aria-label="Bot clock, server time, data time, and your local time">
+    <span class="clock-mode" id="botClockMode" data-mode="LIVE">BOT · LIVE</span>
+    <div class="clock-cell"><span>BOT CLOCK</span><strong id="botClockTime">—</strong></div>
+    <div class="clock-cell"><span>SERVER</span><strong id="botClockServer">—</strong></div>
+    <div class="clock-cell"><span>DATA</span><strong id="botClockData">—</strong></div>
+    <div class="clock-cell"><span>YOUR TIME</span><strong id="botClockLocal">—</strong></div>
+    <p class="clock-note" id="botClockNote">Bot timestamps are UTC. A historical imported file is labelled REPLAY with the exact gap.</p>
   </section>
 
   <section class="notice shell" id="feedNotice" role="status">
@@ -160,9 +169,9 @@
             <div class="signal-copy"><span class="muted-label">CURRENT READ</span><span class="signal-headline" id="signalHeadline">ORAC V1 · WAITING</span><strong id="signalSide">READY</strong><span id="signalReason">Generate a signal to see the result.</span></div>
           </div>
           <div class="signal-details">
-            <div><span>ENTRY TIME</span><strong id="entryTime">—</strong></div>
-            <div><span>GENERATED AT</span><strong id="generatedTime">—</strong></div>
-            <div><span>PREDICTION / EXPIRY</span><strong id="expiryTime">—</strong></div>
+            <div><span>ENTRY TIME (UTC)</span><strong id="entryTime">—</strong></div>
+            <div><span>GENERATED AT (UTC)</span><strong id="generatedTime">—</strong></div>
+            <div><span>PREDICTION / EXPIRY (UTC)</span><strong id="expiryTime">—</strong></div>
             <div><span>MODEL / RULE</span><strong id="modelScore">—</strong></div>
           </div>
           <div class="automation-panel" aria-live="polite">
@@ -179,7 +188,7 @@
         </article>
         <aside class="panel engine-notes">
           <div class="eyebrow small-eyebrow">HOW TO READ IT</div><h2>Signal, not autopilot.</h2>
-          <p class="panel-intro">The engine only uses closed M1 candles. Times are displayed in your browser’s local timezone; API timestamps remain UTC. Provider-late signals are skipped rather than backdated.</p>
+          <p class="panel-intro">The engine only uses closed M1 candles. Every bot timestamp is UTC and shown above against server, data, and local time. In replay the generated time follows the imported candle instead of today’s clock. Provider-late signals are skipped rather than backdated.</p>
           <div class="note-step"><span>01</span><p><strong>Entry time</strong><br>Next M1 boundary after the latest completed candle. Automated entries more than 10 seconds late are discarded.</p></div>
           <div class="note-step"><span>02</span><p><strong>Generated at</strong><br>Actual server generation time; data-feed latency is shown in the lead to expiry.</p></div>
           <div class="note-step"><span>03</span><p><strong>Prediction / expiry</strong><br>Exactly one M1 candle after entry for the default horizon. The outcome is scored only after its close.</p></div>
@@ -198,6 +207,28 @@
           </table>
         </div>
         <p class="micro-copy" id="scanNote">Every executable method is evaluated on the same candle with the same model and ensemble. The scan itself writes nothing; only the best qualified read is recorded as a paper signal. The strictest confirmed method wins a tie, so the loose cadence read cannot outrank a rule-confirmed setup.</p>
+      </article>
+      <article class="panel handoff-panel" id="brokerHandoff">
+        <div class="panel-heading">
+          <div><div class="eyebrow small-eyebrow">BROKER HANDOFF · MANUAL ONLY</div><h2>Pocket Option</h2></div>
+          <span class="mode-tag" id="handoffMode">NO SIGNAL</span>
+        </div>
+        <div class="handoff-layout">
+          <div class="handoff-ticket">
+            <div class="ticket-row"><span>ASSET</span><strong id="handoffAsset">—</strong></div>
+            <div class="ticket-row"><span>DIRECTION</span><strong id="handoffDirection">—</strong></div>
+            <div class="ticket-row"><span>EXPIRY</span><strong id="handoffExpiry">—</strong></div>
+            <div class="ticket-row"><span>ENTRY (UTC)</span><strong id="handoffEntry">—</strong></div>
+          </div>
+          <div class="handoff-copy">
+            <p class="panel-intro" id="handoffNote">Generate or scan a signal to build a copyable ticket. Orbix never places the trade.</p>
+            <div class="handoff-actions">
+              <button class="button button-secondary" id="copyTicket" type="button" disabled>COPY TICKET</button>
+              <a class="button button-secondary" href="https://pocketoption.com/" target="_blank" rel="noopener noreferrer">OPEN POCKET OPTION ↗</a>
+            </div>
+          </div>
+        </div>
+        <p class="micro-copy">Manual execution only. Pocket Option has no official public trading API, so Orbix does not log in, store a session cookie, or send orders; unofficial automation would break the broker's terms. Binary options can expire worthless, and speculative trading is restricted for residents of some countries, including India. Check what you are allowed to trade.</p>
       </article>
       <article class="panel model-lab-panel" aria-labelledby="modelLabTitle">
         <div class="panel-heading">
@@ -573,6 +604,6 @@
     <p>Signal research only. Live feeds are optional/configured on the server. No Quotex login or real trades.</p>
     <span class="footer-right">BUILT FOR BETTER QUESTIONS</span>
   </footer>
-  <script src="/static/app.js?v=20" defer></script>
+  <script src="/static/app.js?v=21" defer></script>
 </body>
 </html>

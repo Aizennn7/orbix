@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from dataclasses import replace
 from hashlib import sha256
 import os
@@ -34,6 +34,9 @@ SIGNAL_WINDOW = 720
 MODEL_TRAINING_WINDOW = 5_000
 BACKTEST_WINDOW = 2_500
 VALIDATION_FRACTION = 0.15
+# Imported data older than this is a replay, not a live read. The bot clock
+# follows the data so generated_at and entry_time cannot disagree by years.
+CLOCK_REPLAY_AFTER_SECONDS = 90
 # Strictest first. A scan records one paper signal, so a rule-confirmed read
 # outranks the deliberately loose cadence mode on the same candle.
 SCAN_ORDER = (
@@ -117,6 +120,40 @@ class Runtime:
                 ).encode("utf-8")
             )
         return digest.hexdigest()
+
+    def clock(self) -> dict:
+        """Return one clock for the API, the UI, and the signal timestamps.
+
+        Imported research files are usually historical. In replay, generated_at
+        follows the last closed candle instead of wall-clock time, so a signal
+        never claims it was generated years after its own entry. The server time
+        and the gap are still returned so the replay is visible, never hidden.
+        """
+        server = datetime.now(timezone.utc)
+        with self.lock:
+            source = self.source
+            latest = self.candles[-1] if self.candles else None
+        if latest is None:
+            return {
+                "mode": "LIVE",
+                "source": source,
+                "reference": format_datetime(server),
+                "server_time": format_datetime(server),
+                "data_time": None,
+                "lag_seconds": None,
+            }
+        data_time = latest.timestamp + timedelta(minutes=1)
+        lag = (server - data_time).total_seconds()
+        replay = source == "IMPORTED CSV" and (lag > CLOCK_REPLAY_AFTER_SECONDS or lag < -5)
+        reference = data_time if replay else server
+        return {
+            "mode": "REPLAY" if replay else "LIVE",
+            "source": source,
+            "reference": format_datetime(reference),
+            "server_time": format_datetime(server),
+            "data_time": format_datetime(data_time),
+            "lag_seconds": round(lag, 1),
+        }
 
     def activate_dataset(self, dataset_id: str) -> dict:
         with self.lock:

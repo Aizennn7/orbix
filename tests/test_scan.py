@@ -7,7 +7,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from orbix.domain import parse_datetime
+from orbix.domain import format_datetime, parse_datetime
 from orbix.runtime import SCAN_ORDER, Runtime
 from orbix.strategies import EXECUTABLE_STRATEGIES
 
@@ -98,6 +98,28 @@ class StrategyScanTests(unittest.TestCase):
                 )
             )
             runtime.candle_store.close()
+
+    def test_clock_is_live_on_demo_and_replays_an_imported_file(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            runtime = Runtime(data_dir=root / "demo-data")
+            live = runtime.clock()
+            self.assertEqual(live["mode"], "LIVE")
+            self.assertEqual(live["source"], "SYNTHETIC DEMO")
+            runtime.candle_store.close()
+
+            history = root / "history.csv"
+            first = datetime(2025, 5, 1, 8, 0, tzinfo=UTC)
+            write_history(history, 320, first)
+            replay_runtime = Runtime(data_dir=root / "replay-data")
+            replay_runtime.import_csv_file(history, "EUR/USD")
+            clock = replay_runtime.clock()
+            expected = first + timedelta(minutes=320)
+            self.assertEqual(clock["mode"], "REPLAY")
+            self.assertEqual(clock["data_time"], format_datetime(expected))
+            self.assertEqual(clock["reference"], clock["data_time"])
+            self.assertGreater(clock["lag_seconds"], 300)
+            replay_runtime.candle_store.close()
 
     def test_blackout_turns_every_method_into_no_signal(self) -> None:
         with tempfile.TemporaryDirectory() as folder:

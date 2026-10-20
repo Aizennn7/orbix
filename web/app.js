@@ -10,7 +10,7 @@ const ROUTES = {
   telegram: "Telegram channel",
   trader: "Trader discipline",
 };
-const state = { market: null, strategies: null, lastSignal: null, route: "dashboard", providerKeys: [""], providerConfig: null, lastBacktestKey: null, backtestTimer: null, backtestRunning: false, automation: null, lastAutoSignalId: null, lastAutoCandleTimestamp: null, notificationsEnabled: false, toastTimer: null, telegram: null, telegramBusy: false, future: null, futureBusy: false, abstentions: null, modelSource: null, trader: null };
+const state = { market: null, strategies: null, lastSignal: null, route: "dashboard", botClock: null, brokerTicket: null, providerKeys: [""], providerConfig: null, lastBacktestKey: null, backtestTimer: null, backtestRunning: false, automation: null, lastAutoSignalId: null, lastAutoCandleTimestamp: null, notificationsEnabled: false, toastTimer: null, telegram: null, telegramBusy: false, future: null, futureBusy: false, abstentions: null, modelSource: null, trader: null };
 const $ = (selector) => document.querySelector(selector);
 
 async function api(path, options = {}) {
@@ -47,7 +47,132 @@ function formatRateInterval(interval) {
 function compactTime(value) {
   if (!value) return "—";
   const date = new Date(value);
-  return new Intl.DateTimeFormat(undefined, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", timeZoneName: "short" }).format(date);
+  return new Intl.DateTimeFormat(undefined, {
+    timeZone: "UTC",
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZoneName: "short",
+  }).format(date);
+}
+
+function clockUtc(value, withSeconds = false) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat(undefined, {
+    timeZone: "UTC",
+    hour: "2-digit",
+    minute: "2-digit",
+    ...(withSeconds ? { second: "2-digit" } : {}),
+    hour12: false,
+  }).format(date);
+}
+
+function clockLocal(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+    timeZoneName: "short",
+  }).format(date);
+}
+
+function formatGap(seconds) {
+  const value = Math.abs(Number(seconds) || 0);
+  if (value < 90) return `${Math.round(value)}s`;
+  if (value < 5400) return `${Math.round(value / 60)} min`;
+  if (value < 172800) return `${(value / 3600).toFixed(1)} h`;
+  return `${(value / 86400).toFixed(1)} days`;
+}
+
+function renderClock() {
+  const clock = state.botClock;
+  if (!clock) return;
+  const mode = clock.mode === "REPLAY" ? "REPLAY" : "LIVE";
+  const badge = $("#botClockMode");
+  badge.textContent = `BOT · ${mode}`;
+  badge.dataset.mode = mode;
+  let reference = clock.reference;
+  if (mode === "LIVE" && clock.receivedAt) {
+    reference = new Date(Date.parse(clock.reference) + (Date.now() - clock.receivedAt)).toISOString();
+  }
+  $("#botClockTime").textContent = `${clockUtc(reference, true)} UTC`;
+  $("#botClockServer").textContent = `${clockUtc(clock.server_time, true)} UTC`;
+  $("#botClockData").textContent = clock.data_time ? `${clockUtc(clock.data_time, true)} UTC` : "—";
+  $("#botClockLocal").textContent = clockLocal(reference);
+  const gap = Number.isFinite(Number(clock.lag_seconds)) ? formatGap(clock.lag_seconds) : "unknown";
+  $("#botClockNote").textContent = mode === "REPLAY"
+    ? `Historical replay: the bot clock follows the imported candle, ${gap} behind the server. Generated, entry, expiry, and journal times now use that one clock.`
+    : `Live clock: bot time follows the server. The latest data boundary is ${gap} away.`;
+}
+
+function updateClock(clock) {
+  if (!clock) return;
+  state.botClock = { ...clock, receivedAt: Date.now() };
+  renderClock();
+}
+
+function renderBrokerHandoff(signal) {
+  const ticket = signal?.broker_ticket || null;
+  const mode = $("#handoffMode");
+  const copy = $("#copyTicket");
+  if (!mode || !copy) return;
+  state.brokerTicket = ticket;
+  if (!ticket) {
+    mode.textContent = "NO SIGNAL";
+    $("#handoffAsset").textContent = "—";
+    $("#handoffDirection").textContent = "—";
+    $("#handoffExpiry").textContent = "—";
+    $("#handoffEntry").textContent = "—";
+    $("#handoffNote").textContent = signal?.side === "NO SIGNAL"
+      ? "No trade: this read is NO SIGNAL. There is nothing to hand to the broker."
+      : "Generate or scan a BUY/SELL signal to build a copyable ticket. Orbix never places the trade.";
+    copy.disabled = true;
+    return;
+  }
+  mode.textContent = "MANUAL · NO ORDER SENT";
+  $("#handoffAsset").textContent = ticket.asset;
+  $("#handoffDirection").textContent = ticket.direction;
+  $("#handoffExpiry").textContent = `${ticket.expiry_minutes} minute${Number(ticket.expiry_minutes) === 1 ? "" : "s"}`;
+  $("#handoffEntry").textContent = compactTime(ticket.entry_time);
+  $("#handoffNote").textContent = `Ticket for ${ticket.pair} · ${ticket.direction}, expiring ${compactTime(ticket.expiry_time)}. Enter it manually in Pocket Option. No order has been sent, and Orbix has no broker session.`;
+  copy.disabled = false;
+}
+
+async function copyBrokerTicket() {
+  const ticket = state.brokerTicket;
+  if (!ticket) return;
+  const button = $("#copyTicket");
+  let copied = false;
+  try {
+    await navigator.clipboard.writeText(ticket.text);
+    copied = true;
+  } catch (error) {
+    const area = document.createElement("textarea");
+    area.value = ticket.text;
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    document.body.appendChild(area);
+    area.select();
+    try {
+      copied = document.execCommand("copy");
+    } catch (copyError) {
+      copied = false;
+    } finally {
+      area.remove();
+    }
+  }
+  button.textContent = copied ? "COPIED" : "COPY FAILED";
+  button.disabled = true;
+  window.setTimeout(() => {
+    button.textContent = "COPY TICKET";
+    button.disabled = false;
+  }, 1600);
 }
 
 function showError(message) {
@@ -134,6 +259,7 @@ async function refreshAutomationStatus() {
   try {
     const data = await api("/api/automation/status");
     state.automation = data;
+    updateClock(data.clock);
     const market = data.market || {};
     const calendar = data.calendar || {};
     const guard = calendar.guard || { status: "UNAVAILABLE", message: "Calendar unavailable.", events: [] };
@@ -145,14 +271,17 @@ async function refreshAutomationStatus() {
     $("#connectionIndicator").classList.toggle("is-pending", Boolean(market.configured && !market.connected));
 
     const paper = Boolean(data.paper_automation_active);
+    const paperWaiting = Boolean(data.paper_automation_waiting);
     $("#autoSignalState").textContent = active
       ? "ACTIVE · NEW CLOSED BARS ONLY"
+      : paperWaiting ? "WATCHING · HISTORICAL DATA"
       : paper ? "ACTIVE · IMPORTED PAPER" : "PAUSED · PROVIDER REQUIREMENTS";
     const learned = data.dataset_learning || {};
     const learningNote = learned.resolved
       ? ` Dataset outcomes: ${Number(learned.learned || 0).toLocaleString()}/${Number(learned.resolved || 0).toLocaleString()} kept.`
       : "";
-    $("#autoSignalDetail").textContent = `${data.auto_status} News guard: ${guard.status.toLowerCase()}.${learningNote}${paper ? " Paper-only imported signals are never auto-posted." : ""}`;
+    const paperNote = data.paper_automation_note ? ` ${data.paper_automation_note}` : "";
+    $("#autoSignalDetail").textContent = `${data.auto_status}${paperNote} News guard: ${guard.status.toLowerCase()}.${learningNote}`;
     $("#newsGuardState").textContent = guard.status === "BLACKOUT" ? "NEWS BLACKOUT" : guard.status;
     $("#newsGuardDetail").textContent = guard.message || "Economic-calendar state unavailable.";
     renderUpcomingEvents(guard);
@@ -398,6 +527,7 @@ function renderSignal(signal) {
   $("#dashboardSignalReason").textContent = signal.reason || "No explanation returned.";
   $("#dashboardSignalPair").textContent = `${signal.pair} · M1`;
   $("#dashboardSignalTimestamp").textContent = compactTime(entryTime);
+  renderBrokerHandoff(signal);
   refreshHistory();
 }
 
@@ -1075,7 +1205,9 @@ let blackholeHeight = 0;
 let blackholeRatio = 1;
 let blackholeStars = [];
 let blackholeFrame = 0;
-const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+const prefersReducedMotion = typeof window.matchMedia === "function"
+  ? window.matchMedia("(prefers-reduced-motion: reduce)")
+  : { matches: false, addEventListener() {}, addListener() {}, removeEventListener() {}, removeListener() {} };
 const TAU = Math.PI * 2;
 
 function createBlackholeStars() {
@@ -1959,6 +2091,7 @@ async function runModelAction(path, confirmation, busyLabel) {
 
 function wireEvents() {
   $("#generateButton").addEventListener("click", generateSignal);
+  $("#copyTicket").addEventListener("click", copyBrokerTicket);
   $("#refreshModel").addEventListener("click", loadModelCard);
   $("#preflightModel").addEventListener("click", loadPreflight);
   $("#retrainModel").addEventListener("click", () => runModelAction(
@@ -2072,7 +2205,11 @@ function wireEvents() {
     if (document.hidden) stopBlackholeAnimation();
     else startBlackholeAnimation();
   });
-  prefersReducedMotion.addEventListener("change", startBlackholeAnimation);
+  if (typeof prefersReducedMotion.addEventListener === "function") {
+    prefersReducedMotion.addEventListener("change", startBlackholeAnimation);
+  } else if (typeof prefersReducedMotion.addListener === "function") {
+    prefersReducedMotion.addListener(startBlackholeAnimation);
+  }
 }
 
 async function start() {
@@ -2090,6 +2227,7 @@ async function start() {
   await Promise.all([loadStrategies(), loadMarket(), refreshHistory(), refreshStorageSummary(), refreshAutomationStatus()]);
   scheduleAutomaticBacktest();
   window.setInterval(() => { void refreshAutomationStatus(); }, 10000);
+  window.setInterval(renderClock, 1000);
   window.setInterval(() => { if (state.route === "trader") void loadTraderPage(); }, 30000);
   if (state.route === "dashboard") startBlackholeAnimation();
 }

@@ -261,6 +261,37 @@ class DisciplineAutomationTests(unittest.TestCase):
             self.assertIn("Took BUY", journal[0]["detail"])
             runtime.candle_store.close()
 
+    def test_historical_import_is_waiting_not_active(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            history = root / "history.csv"
+            first = datetime(2025, 5, 1, 8, 0, tzinfo=UTC)
+            with history.open("w", newline="", encoding="utf-8") as output:
+                writer = csv.writer(output)
+                writer.writerow(["timestamp", "open", "high", "low", "close", "volume"])
+                for index in range(320):
+                    stamp = first + timedelta(minutes=index)
+                    opening = 1.1 + 0.00002 * index
+                    close = opening * (1.0 + (0.00007 if index % 3 else -0.00004))
+                    writer.writerow([
+                        format_datetime(stamp),
+                        format(opening, ".12f"),
+                        format(max(opening, close) + 0.00004, ".12f"),
+                        format(min(opening, close) - 0.00004, ".12f"),
+                        format(close, ".12f"),
+                        100,
+                    ])
+            runtime = Runtime(data_dir=root / "data")
+            runtime.import_csv_file(history, "EUR/USD")
+            service = AutomationService(runtime)
+            state = service.status()
+            self.assertEqual(state["clock"]["mode"], "REPLAY")
+            self.assertTrue(state["paper_automation_enabled"])
+            self.assertFalse(state["paper_automation_active"])
+            self.assertTrue(state["paper_automation_waiting"])
+            self.assertIn("historical", state["paper_automation_note"].lower())
+            runtime.candle_store.close()
+
 
 if __name__ == "__main__":
     unittest.main()

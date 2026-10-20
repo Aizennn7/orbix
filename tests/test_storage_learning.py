@@ -97,6 +97,15 @@ class StorageAndOnlineLearningTests(unittest.TestCase):
 
             store.close()
 
+    def test_storage_summary_reports_the_configured_database_path(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            database = Path(folder) / "nested" / "candles.duckdb"
+            store = CandleStore(database)
+            try:
+                self.assertEqual(store.summary()["path"], str(database))
+            finally:
+                store.close()
+
     def test_expired_signal_auto_resolves_and_updates_model_once(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
