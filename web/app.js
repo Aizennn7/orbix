@@ -6,8 +6,10 @@ const ROUTES = {
   connections: "Data connections",
   paper: "Paper log",
   "strategy-lab": "Strategy lab",
+  future: "Future",
+  telegram: "Telegram channel",
 };
-const state = { market: null, strategies: null, lastSignal: null, route: "dashboard", providerKeys: [""], providerConfig: null, lastBacktestKey: null, backtestTimer: null, backtestRunning: false, automation: null, lastAutoSignalId: null, lastAutoCandleTimestamp: null, notificationsEnabled: false, toastTimer: null };
+const state = { market: null, strategies: null, lastSignal: null, route: "dashboard", providerKeys: [""], providerConfig: null, lastBacktestKey: null, backtestTimer: null, backtestRunning: false, automation: null, lastAutoSignalId: null, lastAutoCandleTimestamp: null, notificationsEnabled: false, toastTimer: null, telegram: null, telegramBusy: false, future: null, futureBusy: false };
 const $ = (selector) => document.querySelector(selector);
 
 async function api(path, options = {}) {
@@ -806,6 +808,8 @@ function setActivePage(route, shouldScroll = true) {
     if (state.market) void loadMarket();
     scheduleAutomaticBacktest();
   }
+  if (route === "future") void loadFuturePlan();
+  if (route === "telegram") void refreshTelegramPage();
 }
 
 function handleRouteChange() {
@@ -997,8 +1001,339 @@ function startBlackholeAnimation() {
   }
 }
 
+function telegramDeliveryLabel(signalId, data) {
+  const sent = new Set(data?.sent_signal_ids || []);
+  return sent.has(signalId) ? "SENT" : "QUEUED";
+}
+
+function renderTelegramStatus(data) {
+  state.telegram = data;
+  const configured = Boolean(data.configured);
+  const modeTag = $("#telegramModeTag");
+  if (modeTag) modeTag.textContent = configured ? "CONNECTED" : "NOT CONFIGURED";
+  const indicator = $("#telegramIndicator");
+  if (indicator) {
+    indicator.classList.toggle("is-configured", configured);
+    indicator.classList.toggle("is-pending", !configured);
+  }
+  const target = $("#telegramTarget");
+  if (target) target.textContent = data.target_chat || "NOT SET";
+  const message = $("#telegramStateMessage");
+  if (message) {
+    message.textContent = configured
+      ? `Admin bot ready · automatic posting ${data.auto_post_enabled ? "ON" : "OFF"} · ${data.timezone}`
+      : "Set ORBIX_TELEGRAM_BOT_TOKEN and ORBIX_TELEGRAM_CHAT_ID on the server, then restart.";
+  }
+  const tokenState = $("#telegramTokenState");
+  if (tokenState) tokenState.textContent = configured ? "CONFIGURED (HIDDEN)" : "NOT CONFIGURED";
+  const chatState = $("#telegramChatState");
+  if (chatState) chatState.textContent = configured ? "CONFIGURED" : "NOT CONFIGURED";
+  const timezoneState = $("#telegramTimezoneState");
+  if (timezoneState) timezoneState.textContent = data.timezone || "UTC";
+  const autoState = $("#telegramAutoState");
+  if (autoState) autoState.textContent = data.auto_post_enabled ? "ON" : "OFF";
+  ["#telegramSendLatest", "#telegramSendBatch", "#telegramTest"].forEach((selector) => {
+    const button = $(selector);
+    if (button) button.disabled = !configured || state.telegramBusy;
+  });
+  const autoToggle = $("#telegramAutoPost");
+  if (autoToggle) {
+    autoToggle.checked = Boolean(data.auto_post_enabled);
+    autoToggle.disabled = !configured;
+  }
+  const rows = $("#telegramLogRows");
+  if (rows) {
+    rows.replaceChildren();
+    const signals = data.recent_signals || [];
+    if (!signals.length) {
+      const row = document.createElement("tr");
+      const cell = document.createElement("td");
+      cell.colSpan = 5;
+      cell.className = "empty-row";
+      cell.textContent = "No automatic signals recorded yet.";
+      row.append(cell);
+      rows.append(row);
+    } else {
+      signals.slice().reverse().forEach((signal) => {
+        const row = document.createElement("tr");
+        const entry = document.createElement("td");
+        entry.textContent = compactTime(signal.entry_time);
+        const pair = document.createElement("td");
+        pair.textContent = signal.pair || "—";
+        const direction = document.createElement("td");
+        direction.textContent = signal.side === "BUY" ? "CALL" : signal.side === "SELL" ? "PUT" : "ABSTAIN";
+        const probability = document.createElement("td");
+        probability.textContent = signal.probability_up == null ? "—" : `${(Number(signal.probability_up) * 100).toFixed(1)}%`;
+        const delivery = document.createElement("td");
+        const chip = document.createElement("span");
+        const delivered = telegramDeliveryLabel(signal.signal_id, data) === "SENT";
+        chip.className = `telegram-delivery-chip${delivered ? " is-sent" : ""}`;
+        chip.textContent = delivered ? "SENT" : "QUEUED";
+        delivery.append(chip);
+        row.append(entry, pair, direction, probability, delivery);
+        rows.append(row);
+      });
+    }
+  }
+  if (data.last_error) {
+    const status = $("#telegramSendStatus");
+    if (status) status.textContent = `Last delivery error: ${data.last_error}`;
+  }
+}
+
+async function refreshTelegramPage(options = {}) {
+  try {
+    const data = await api("/api/telegram/status");
+    renderTelegramStatus(data);
+    if (options.announce) {
+      const status = $("#telegramSendStatus");
+      if (status) status.textContent = data.configured ? "Channel status refreshed." : "Bot credentials are not configured on the server yet.";
+    }
+  } catch (error) {
+    const status = $("#telegramSendStatus");
+    if (status) status.textContent = error.message;
+  }
+}
+
+function setTelegramBusy(busy, message) {
+  state.telegramBusy = busy;
+  ["#telegramSendLatest", "#telegramSendBatch", "#telegramTest"].forEach((selector) => {
+    const button = $(selector);
+    if (button) button.disabled = busy || !state.telegram?.configured;
+  });
+  const status = $("#telegramSendStatus");
+  if (status && message) status.textContent = message;
+}
+
+async function sendTelegramSignals(kind) {
+  if (state.telegramBusy) return;
+  const includeDemo = Boolean($("#telegramIncludeDemo")?.checked);
+  if (kind === "test") {
+    setTelegramBusy(true, "Sending a connection test…");
+    try {
+      const result = await api("/api/telegram/test", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      setTelegramBusy(false, `Connection test delivered to ${result.chat_id} (message ${result.message_id}).`);
+      await refreshTelegramPage();
+    } catch (error) {
+      setTelegramBusy(false, `Test failed: ${error.message}`);
+    }
+    return;
+  }
+  const limit = kind === "batch" ? 5 : 1;
+  setTelegramBusy(true, kind === "batch" ? "Sending the latest unsent signals…" : "Sending the latest signal…");
+  try {
+    const result = await api("/api/telegram/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ limit, include_demo: includeDemo }),
+    });
+    if (result.status === "nothing_to_send") {
+      setTelegramBusy(false, result.message || "No unsent signals are available.");
+    } else {
+      setTelegramBusy(false, `Delivered ${result.sent.length} signal(s) · message ${result.message_id}.`);
+    }
+    await refreshTelegramPage();
+  } catch (error) {
+    setTelegramBusy(false, `Send failed: ${error.message}`);
+  }
+}
+
+async function previewTelegramMessage() {
+  const includeDemo = Boolean($("#telegramIncludeDemo")?.checked);
+  const output = $("#telegramPreviewText");
+  try {
+    const result = await api("/api/telegram/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ limit: 1, include_demo: includeDemo, dry_run: true }),
+    });
+    if (!output) return;
+    if (result.status === "nothing_to_send") {
+      output.hidden = false;
+      output.textContent = result.message || "No signal is available to preview.";
+    } else {
+      output.hidden = false;
+      output.textContent = result.text;
+    }
+  } catch (error) {
+    if (output) {
+      output.hidden = false;
+      output.textContent = error.message;
+    }
+  }
+}
+
+async function toggleTelegramAutoPost() {
+  const toggle = $("#telegramAutoPost");
+  if (!toggle) return;
+  const desired = toggle.checked;
+  toggle.disabled = true;
+  try {
+    const data = await api("/api/telegram/auto", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: desired }),
+    });
+    renderTelegramStatus({ ...state.telegram, ...data });
+    const status = $("#telegramSendStatus");
+    if (status) status.textContent = data.auto_post_enabled ? "Automatic posting enabled for new live signals." : "Automatic posting disabled.";
+  } catch (error) {
+    toggle.checked = !desired;
+    toggle.disabled = false;
+    const status = $("#telegramSendStatus");
+    if (status) status.textContent = error.message;
+  }
+}
+
+function renderFuturePlan(plan) {
+  state.future = plan;
+  const focus = plan.focus || {};
+  const data = plan.data || {};
+  const readiness = plan.readiness || {};
+  const evidence = plan.evidence;
+  $("#futurePair").textContent = `${focus.pair || data.pair || "—"} · M1`;
+  $("#futureWhy").textContent = focus.why || "No liquidity note is available for this pair.";
+  $("#futureAccuracyNote").textContent = focus.accuracy_note || "No pair is more likely to be accurate.";
+  $("#futureLiquidityRank").textContent = focus.liquidity_rank ? `#${focus.liquidity_rank}` : "—";
+  $("#futureDataSource").textContent = data.source || "—";
+  $("#futureCandleCount").textContent = Number(data.candles || 0).toLocaleString();
+  $("#futureReadyState").textContent = readiness.ready ? "ARMED" : "BLOCKED";
+
+  const blocked = $("#futureBlocked");
+  const reasons = $("#futureBlockedReasons");
+  if (blocked && reasons) {
+    reasons.replaceChildren();
+    (readiness.reasons || []).forEach((reason) => {
+      const item = document.createElement("li");
+      item.textContent = reason;
+      reasons.append(item);
+    });
+    blocked.hidden = Boolean(readiness.ready) || !(readiness.reasons || []).length;
+  }
+
+  const windows = plan.windows || [];
+  const windowGrid = $("#futureWindowGrid");
+  if (windowGrid) {
+    windowGrid.replaceChildren();
+    windows.forEach((window, index) => {
+      const card = document.createElement("div");
+      card.className = `future-window ${window.status === "ARMED" ? "is-armed" : "is-blocked"}`;
+      const number = document.createElement("span");
+      number.textContent = `WINDOW ${String(index + 1).padStart(2, "0")}`;
+      const time = document.createElement("strong");
+      time.textContent = new Date(window.entry_time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      const stateChip = document.createElement("b");
+      stateChip.className = "future-window-state";
+      stateChip.textContent = window.status;
+      const note = document.createElement("small");
+      note.textContent = window.status === "ARMED" ? "Direction reveals on candle close" : "Waiting for readiness";
+      card.append(number, time, stateChip, note);
+      windowGrid.append(card);
+    });
+  }
+  const windowCount = $("#futureWindowCount");
+  if (windowCount) windowCount.textContent = `${windows.length} WINDOWS`;
+
+  const replayRows = $("#futureReplayRows");
+  if (replayRows) {
+    replayRows.replaceChildren();
+    const replay = plan.replay || [];
+    if (!replay.length) {
+      const row = document.createElement("tr");
+      const cell = document.createElement("td");
+      cell.colSpan = 5;
+      cell.className = "empty-row";
+      cell.textContent = "Not enough completed candles to replay the gate.";
+      row.append(cell);
+      replayRows.append(row);
+    }
+    replay.slice().reverse().forEach((item) => {
+      const row = document.createElement("tr");
+      const entry = document.createElement("td");
+      entry.textContent = compactTime(item.entry_time);
+      const prediction = document.createElement("td");
+      prediction.textContent = compactTime(item.prediction_time);
+      const direction = document.createElement("td");
+      direction.textContent = item.direction || "—";
+      const probability = document.createElement("td");
+      probability.textContent = item.probability_up == null ? "—" : `${(Number(item.probability_up) * 100).toFixed(1)}%`;
+      const why = document.createElement("td");
+      why.className = "future-replay-why";
+      why.textContent = String(item.reason || "").slice(0, 150);
+      row.append(entry, prediction, direction, probability, why);
+      replayRows.append(row);
+    });
+  }
+  const replayCount = $("#futureReplayCount");
+  if (replayCount) replayCount.textContent = `${(plan.replay || []).length} ROWS`;
+
+  const hitRate = $("#futureHitRate");
+  if (hitRate) hitRate.textContent = evidence?.win_rate == null ? "—" : `${(evidence.win_rate * 100).toFixed(1)}%`;
+  const interval = $("#futureHitInterval");
+  if (interval) {
+    interval.textContent = evidence?.win_rate_ci95
+      ? `${(evidence.win_rate_ci95.lower * 100).toFixed(1)}–${(evidence.win_rate_ci95.upper * 100).toFixed(1)}%`
+      : "—";
+  }
+  const signals = $("#futureSignals");
+  if (signals) signals.textContent = evidence ? `${evidence.signals} / ${evidence.test_candles}` : "—";
+  const breakEven = $("#futureBreakEven");
+  if (breakEven) breakEven.textContent = evidence?.break_even_win_rate == null ? "—" : `${(evidence.break_even_win_rate * 100).toFixed(1)}%`;
+  const evidenceNote = $("#futureEvidenceNote");
+  if (evidenceNote) {
+    const intervalText = evidence?.win_rate_ci95
+      ? `${(evidence.win_rate_ci95.lower * 100).toFixed(1)}–${(evidence.win_rate_ci95.upper * 100).toFixed(1)}%`
+      : "wide";
+    evidenceNote.textContent = evidence
+      ? `Walk-forward re-run on the active ${data.source} dataset (${evidence.window_candles.toLocaleString()} candles, ${(evidence.assumed_payout * 100).toFixed(0)}% payout assumption). The observed hit rate has a ${intervalText} interval; that range is not proof of future accuracy.`
+      : "At least 120 candles are needed before any walk-forward evidence exists.";
+    if (data.source === "SYNTHETIC DEMO") evidenceNote.textContent += " Synthetic demo data is practice data, not market evidence.";
+  }
+
+  const alternatives = $("#futureAlternatives");
+  if (alternatives) {
+    alternatives.replaceChildren();
+    (plan.alternatives || []).forEach((item) => {
+      const row = document.createElement("div");
+      row.className = `future-alternative${item.active ? " is-active" : ""}`;
+      const name = document.createElement("strong");
+      name.textContent = item.pair;
+      const detail = document.createElement("span");
+      detail.textContent = `${item.liquidity} ${item.notes}`;
+      const status = document.createElement("em");
+      status.textContent = item.active ? "ACTIVE" : "NO LOCAL DATA";
+      row.append(name, detail, status);
+      alternatives.append(row);
+    });
+  }
+  const planStatus = $("#futurePlanStatus");
+  if (planStatus) planStatus.textContent = `Plan generated ${compactTime(plan.generated_at)} · ${plan.strategy_name}.`;
+}
+
+async function loadFuturePlan() {
+  if (state.futureBusy) return;
+  state.futureBusy = true;
+  const status = $("#futurePlanStatus");
+  if (status) status.textContent = "Generating the single-pair plan…";
+  try {
+    const plan = await api("/api/future/plan?count=6");
+    renderFuturePlan(plan);
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  } finally {
+    state.futureBusy = false;
+  }
+}
+
 function wireEvents() {
   $("#generateButton").addEventListener("click", generateSignal);
+  $("#futureRefresh").addEventListener("click", loadFuturePlan);
+  $("#telegramSendLatest").addEventListener("click", () => sendTelegramSignals("latest"));
+  $("#telegramSendBatch").addEventListener("click", () => sendTelegramSignals("batch"));
+  $("#telegramTest").addEventListener("click", () => sendTelegramSignals("test"));
+  $("#telegramPreview").addEventListener("click", previewTelegramMessage);
+  $("#telegramAutoPost").addEventListener("change", toggleTelegramAutoPost);
+  $("#telegramRefresh").addEventListener("click", () => refreshTelegramPage({ announce: true }));
   $("#enableNotifications").addEventListener("click", toggleBrowserNotifications);
   $("#syncLiveFeedButton").addEventListener("click", syncLiveFeed);
   $("#refreshCalendarButton").addEventListener("click", refreshCalendarNow);

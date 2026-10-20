@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "orbix-signal-lab"
-version = "0.2.0"
+version = "0.3.0"
 description = "Signal research and paper-testing dashboard for one-minute FX candles"
 requires-python = ">=3.11"
 dependencies = [

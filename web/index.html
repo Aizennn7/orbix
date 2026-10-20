@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#050505">
   <title>Dashboard — Orbix Signal Lab</title>
-  <link rel="stylesheet" href="/static/styles.css?v=10">
+  <link rel="stylesheet" href="/static/styles.css?v=11">
 </head>
 <body>
   <div class="noise" aria-hidden="true"></div>
@@ -29,6 +29,8 @@
       <a href="#connections" data-route="connections">Connections</a>
       <a href="#paper" data-route="paper">Paper log</a>
       <a href="#strategy-lab" data-route="strategy-lab">Strategy lab</a>
+      <a href="#future" data-route="future">Future</a>
+      <a href="#telegram" data-route="telegram">Telegram</a>
     </nav>
     <div class="top-status">
       <span class="status-dot"></span><span id="sourceBadge">SYNTHETIC DEMO</span>
@@ -133,7 +135,9 @@
       <section class="route-card-grid" aria-label="Research pages">
         <a class="route-card" href="#backtest" data-route="backtest"><span class="route-card-number">01</span><strong>Test an idea</strong><small>Walk-forward paper results</small><span class="route-card-arrow">↗</span></a>
         <a class="route-card" href="#data" data-route="data"><span class="route-card-number">02</span><strong>Bring your data</strong><small>Import M1 candle history</small><span class="route-card-arrow">↗</span></a>
-        <a class="route-card" href="#strategy-lab" data-route="strategy-lab"><span class="route-card-number">03</span><strong>Explore strategies</strong><small>Four prototypes · 30 ideas</small><span class="route-card-arrow">↗</span></a>
+        <a class="route-card" href="#strategy-lab" data-route="strategy-lab"><span class="route-card-number">03</span><strong>Explore strategies</strong><small>Five prototypes · 30 ideas</small><span class="route-card-arrow">↗</span></a>
+        <a class="route-card" href="#future" data-route="future"><span class="route-card-number">04</span><strong>Future focus</strong><small>One pair · next windows</small><span class="route-card-arrow">↗</span></a>
+        <a class="route-card" href="#telegram" data-route="telegram"><span class="route-card-number">05</span><strong>Send to Telegram</strong><small>One channel · one click</small><span class="route-card-arrow">↗</span></a>
       </section>
     </section>
 
@@ -322,6 +326,106 @@
         <div class="catalog-list" id="catalogList" hidden></div>
       </article>
     </section>
+
+    <section class="page-view" id="page-future" data-page="future" aria-labelledby="future-title" hidden>
+      <header class="page-heading">
+        <div><div class="eyebrow"><span class="eyebrow-line"></span> SINGLE-PAIR FOCUS</div><h1 id="future-title">Future</h1><p>One pair at a time: the upcoming minute boundaries, the live readiness gate, and a replay of the most recent closed bars. No direction is invented for a candle that has not closed.</p></div>
+        <div class="blackhole-mini" aria-hidden="true"><i class="mini-ring ring-one"></i><i class="mini-ring ring-two"></i><b></b></div>
+      </header>
+      <div class="future-layout">
+        <article class="panel future-focus-panel">
+          <div class="panel-heading"><div><div class="eyebrow small-eyebrow">FOCUS PAIR</div><h2 id="futurePair">EUR/USD</h2></div><button class="text-button" id="futureRefresh">REFRESH PLAN ↻</button></div>
+          <p class="panel-intro" id="futureWhy">Loading the single-pair plan…</p>
+          <div class="future-focus-grid">
+            <div><span>LIQUIDITY RANK</span><strong id="futureLiquidityRank">—</strong></div>
+            <div><span>DATA SOURCE</span><strong id="futureDataSource">—</strong></div>
+            <div><span>CANDLES</span><strong id="futureCandleCount">—</strong></div>
+            <div><span>PLAN STATE</span><strong id="futureReadyState">—</strong></div>
+          </div>
+          <p class="micro-copy" id="futureAccuracyNote">No pair has a higher directional hit rate because it is more liquid. Liquidity changes the cost, not the probability.</p>
+          <div class="future-blocked" id="futureBlocked" hidden><strong>WINDOWS BLOCKED</strong><ul id="futureBlockedReasons"></ul></div>
+          <p class="micro-copy" id="futurePlanStatus" role="status"></p>
+        </article>
+        <aside class="panel future-evidence-panel">
+          <div class="eyebrow small-eyebrow">WALK-FORWARD EVIDENCE</div>
+          <div class="future-evidence-grid">
+            <div class="result-stat"><span>HIT RATE</span><strong id="futureHitRate">—</strong></div>
+            <div class="result-stat"><span>95% INTERVAL</span><strong id="futureHitInterval">—</strong></div>
+            <div class="result-stat"><span>SIGNALS</span><strong id="futureSignals">—</strong></div>
+            <div class="result-stat"><span>BREAK-EVEN</span><strong id="futureBreakEven">—</strong></div>
+          </div>
+          <p class="micro-copy" id="futureEvidenceNote">Evidence appears after the plan is generated.</p>
+        </aside>
+      </div>
+      <article class="panel future-windows-panel">
+        <div class="panel-heading"><div><div class="eyebrow small-eyebrow">UPCOMING MINUTE BOUNDARIES</div><h2>Armed windows</h2></div><span class="mode-tag" id="futureWindowCount">—</span></div>
+        <div class="future-window-grid" id="futureWindowGrid"></div>
+        <p class="micro-copy">A direction is filled in only after the previous candle closes and the gate runs. Pre-announcing a direction for an unclosed candle would be a guess, not a signal.</p>
+      </article>
+      <article class="panel future-replay-panel">
+        <div class="panel-heading"><div><div class="eyebrow small-eyebrow">RECENT CLOSED BARS</div><h2>Gate replay</h2></div><span class="mode-tag" id="futureReplayCount">—</span></div>
+        <div class="history-table-wrap">
+          <table class="history-table"><thead><tr><th>ENTRY TIME</th><th>PREDICTION</th><th>DIRECTION</th><th>MODEL ESTIMATE</th><th>WHY</th></tr></thead><tbody id="futureReplayRows"><tr><td colspan="5" class="empty-row">Generate the plan to replay recent bars.</td></tr></tbody></table>
+        </div>
+        <p class="micro-copy">Replay rows are re-runs over candles that have already closed. They are a transparency check on the gate, not a promise about the next candle.</p>
+        <a class="text-button inline-link" href="#telegram" data-route="telegram">PUBLISH RECORDED SIGNALS ON TELEGRAM ↗</a>
+      </article>
+      <article class="panel future-alternatives-panel">
+        <div class="panel-heading"><div><div class="eyebrow small-eyebrow">PAIR CHOICE</div><h2>Liquidity order, not accuracy order</h2></div></div>
+        <div class="future-alternative-list" id="futureAlternatives"></div>
+        <p class="micro-copy">Only the active dataset is analysed. Import that pair's completed M1 CSV on the Data page to change the focus pair.</p>
+      </article>
+    </section>
+
+    <section class="page-view" id="page-telegram" data-page="telegram" aria-labelledby="telegram-title" hidden>
+      <header class="page-heading">
+        <div><div class="eyebrow"><span class="eyebrow-line"></span> ONE-CLICK DELIVERY</div><h1 id="telegram-title">Telegram channel</h1><p>Publish recorded M1 research signals to the single channel your admin bot can post in. The signal engine, its strategy, and every other page stay unchanged.</p></div>
+        <div class="blackhole-mini" aria-hidden="true"><i class="mini-ring ring-one"></i><i class="mini-ring ring-two"></i><b></b></div>
+      </header>
+      <div class="connection-layout">
+        <article class="panel telegram-send-panel">
+          <div class="panel-heading"><div><div class="eyebrow small-eyebrow">ADMIN BOT · ONE CHANNEL</div><h2>Deliver signals</h2></div><span class="mode-tag" id="telegramModeTag">CHECKING</span></div>
+          <div class="provider-state-card telegram-state-card"><span class="connection-indicator" id="telegramIndicator" aria-hidden="true"></span><div><span class="muted-label">TARGET CHANNEL</span><strong id="telegramTarget">NOT SET</strong><small id="telegramStateMessage">Reading server configuration…</small></div></div>
+          <div class="telegram-actions">
+            <button class="button button-primary" id="telegramSendLatest" type="button" disabled>SEND LATEST SIGNAL <span class="button-arrow">↗</span></button>
+            <button class="button button-secondary" id="telegramSendBatch" type="button" disabled>SEND LAST 5 <span class="button-arrow">↗</span></button>
+            <button class="button button-secondary" id="telegramTest" type="button" disabled>TEST CONNECTION</button>
+            <button class="text-button" id="telegramPreview" type="button">PREVIEW MESSAGE</button>
+          </div>
+          <label class="toggle-row" for="telegramAutoPost"><input type="checkbox" id="telegramAutoPost"><span><strong>AUTO-POST NEW AUTOMATIC SIGNALS</strong><small>Optional. Requires live provider data and a clear event calendar; a paper result follows after expiry.</small></span></label>
+          <label class="toggle-row" for="telegramIncludeDemo"><input type="checkbox" id="telegramIncludeDemo"><span><strong>ALLOW SYNTHETIC DEMO TRANSMISSION</strong><small>Off by default. Demo rows are labelled as synthetic and are not market evidence.</small></span></label>
+          <p class="micro-copy" id="telegramSendStatus" role="status">Configure the bot token and channel id on the server, then restart and test the connection.</p>
+          <pre class="telegram-preview" id="telegramPreviewText" hidden></pre>
+          <p class="micro-copy">Each signal is deduplicated by id. Re-sending the same id requires an explicit replay, so a double click cannot spam the channel.</p>
+        </article>
+        <aside class="panel telegram-setup-panel">
+          <div class="eyebrow small-eyebrow">SERVER SETUP</div>
+          <h2>Bot + channel checklist</h2>
+          <ol class="setup-steps">
+            <li>Create the bot with <strong>@BotFather</strong> and copy its token into the server environment.</li>
+            <li>Add that bot to the channel as an <strong>administrator</strong> with “Post messages”.</li>
+            <li>Use the numeric <code>-100…</code> channel id, or <code>@channelusername</code>.</li>
+            <li>Restart Orbix, press <strong>TEST CONNECTION</strong>, then use the one-click send.</li>
+          </ol>
+          <div class="server-provider-list">
+            <div><span>BOT TOKEN</span><strong id="telegramTokenState">NOT CONFIGURED</strong><small><code>ORBIX_TELEGRAM_BOT_TOKEN</code> · server only</small></div>
+            <div><span>CHANNEL ID</span><strong id="telegramChatState">NOT CONFIGURED</strong><small><code>ORBIX_TELEGRAM_CHAT_ID</code></small></div>
+            <div><span>TIME LABEL</span><strong id="telegramTimezoneState">Asia/Kolkata</strong><small><code>ORBIX_TELEGRAM_TIMEZONE</code></small></div>
+            <div><span>AUTO-POST DEFAULT</span><strong id="telegramAutoState">OFF</strong><small><code>ORBIX_TELEGRAM_AUTO_POST</code></small></div>
+          </div>
+          <p class="provider-security-note"><strong>Why the browser cannot send directly:</strong> Telegram bots need the token on every call. It stays on the server; the page only asks Orbix to send. A bot cannot read or trade your account, and no broker order is ever placed.</p>
+          <p class="provider-security-note"><strong>Broker OTC symbols:</strong> posts use the pair loaded from Orbix’s own feed (for example <code>EUR/USD</code>). Broker-generated symbols such as <code>EURUSD-OTC</code> are not in that feed and are never relabelled to look like one.</p>
+        </aside>
+      </div>
+      <article class="panel telegram-log-panel">
+        <div class="panel-heading"><div><div class="eyebrow small-eyebrow">DELIVERY LOG</div><h2>Recent automatic signals</h2></div><button class="text-button" id="telegramRefresh" type="button">REFRESH ↻</button></div>
+        <div class="history-table-wrap">
+          <table class="history-table"><thead><tr><th>ENTRY</th><th>PAIR</th><th>DIRECTION</th><th>MODEL ESTIMATE</th><th>DELIVERY</th></tr></thead><tbody id="telegramLogRows"><tr><td colspan="5" class="empty-row">No automatic signals recorded yet.</td></tr></tbody></table>
+        </div>
+        <p class="micro-copy">“QUEUED” means a signal exists but has not reached the channel. Synthetic demo signals are never auto-posted.</p>
+      </article>
+    </section>
+
   </main>
 
   <div class="notification-toast" id="notificationToast" role="status" aria-live="polite" hidden></div>
@@ -330,6 +434,6 @@
     <p>Signal research only. Live feeds are optional/configured on the server. No Quotex login or real trades.</p>
     <span class="footer-right">BUILT FOR BETTER QUESTIONS</span>
   </footer>
-  <script src="/static/app.js?v=10" defer></script>
+  <script src="/static/app.js?v=11" defer></script>
 </body>
 </html>

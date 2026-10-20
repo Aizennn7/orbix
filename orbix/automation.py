@@ -19,6 +19,7 @@ from .domain import Candle, format_datetime, parse_datetime
 from .market_data import parse_candles_csv, validate_candles
 from .runtime import Runtime
 from .strategies import EXECUTABLE_STRATEGIES
+from .telegram import TelegramError, TelegramNotifier
 
 
 UTC = timezone.utc
@@ -317,6 +318,26 @@ class AutomationService:
         self.max_entry_delay_seconds = _env_int("ORBIX_MAX_ENTRY_DELAY_SECONDS", 10, 1, 30)
         self.max_bar_age_seconds = _env_int("ORBIX_MAX_BAR_AGE_SECONDS", 180, 60, 900)
         self.auto_signals_enabled = _env_bool("ORBIX_AUTO_SIGNALS", True)
+        self.telegram = TelegramNotifier(
+            os.getenv("ORBIX_TELEGRAM_BOT_TOKEN"),
+            os.getenv("ORBIX_TELEGRAM_CHAT_ID"),
+        )
+        self.telegram_timezone_name = os.getenv("ORBIX_TELEGRAM_TIMEZONE", "Asia/Kolkata").strip() or "Asia/Kolkata"
+        try:
+            self.telegram_timezone = ZoneInfo(self.telegram_timezone_name)
+            self._telegram_timezone_error: str | None = None
+        except ZoneInfoNotFoundError:
+            self.telegram_timezone = ZoneInfo("UTC")
+            self._telegram_timezone_error = f"Unknown Telegram timezone '{self.telegram_timezone_name}'; using UTC."
+        self._telegram_auto_post_enabled = _env_bool("ORBIX_TELEGRAM_AUTO_POST", False)
+        self._telegram_signal_ids: list[str] = []
+        self._telegram_result_ids: list[str] = []
+        self._telegram_inflight_signal_ids: set[str] = set()
+        self._telegram_inflight_result_ids: set[str] = set()
+        self._telegram_last_error: str | None = self._telegram_timezone_error
+        self._telegram_last_sent_at: datetime | None = None
+        self._telegram_last_message_id: int | str | None = None
+        self._auto_signal_history: list[dict[str, Any]] = []
         requested_strategy = os.getenv("ORBIX_AUTO_STRATEGY", "orbix_confluence").strip()
         valid_strategies = {item["id"] for item in EXECUTABLE_STRATEGIES}
         self._strategy_config_error = None
@@ -346,6 +367,16 @@ class AutomationService:
         try:
             payload = json.loads(self._marker_path().read_text(encoding="utf-8"))
             self._user_paused = bool(payload.get("paused_by_user", False))
+            self._telegram_auto_post_enabled = bool(
+                payload.get("telegram_auto_post_enabled", self._telegram_auto_post_enabled)
+            )
+            self._telegram_signal_ids = [str(item) for item in payload.get("telegram_signal_ids", [])][-500:]
+            self._telegram_result_ids = [str(item) for item in payload.get("telegram_result_ids", [])][-500:]
+            self._auto_signal_history = [
+                item for item in payload.get("auto_signal_history", []) if isinstance(item, dict)
+            ][-20:]
+            sent_at = payload.get("telegram_last_sent_at")
+            self._telegram_last_sent_at = parse_datetime(sent_at) if sent_at else None
             with self.runtime.lock:
                 active_id = self.runtime._dataset_id
                 active_pair = self.runtime.pair
@@ -362,19 +393,26 @@ class AutomationService:
             return
 
     def _save_marker(self) -> None:
-        payload = {
-            "provider": "twelve_data",
-            "pair": self.market_pair,
-            "dataset_id": self._feed_dataset_id,
-            "paused_by_user": self._user_paused,
-            "last_analyzed_timestamp": format_datetime(self._last_analyzed_timestamp)
-            if self._last_analyzed_timestamp else None,
-        }
-        target = self._marker_path()
-        target.parent.mkdir(parents=True, exist_ok=True)
-        temporary = target.with_suffix(".tmp")
-        temporary.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        temporary.replace(target)
+        with self._state_lock:
+            payload = {
+                "provider": "twelve_data",
+                "pair": self.market_pair,
+                "dataset_id": self._feed_dataset_id,
+                "paused_by_user": self._user_paused,
+                "last_analyzed_timestamp": format_datetime(self._last_analyzed_timestamp)
+                if self._last_analyzed_timestamp else None,
+                "telegram_auto_post_enabled": self._telegram_auto_post_enabled,
+                "telegram_signal_ids": self._telegram_signal_ids[-500:],
+                "telegram_result_ids": self._telegram_result_ids[-500:],
+                "telegram_last_sent_at": format_datetime(self._telegram_last_sent_at)
+                if self._telegram_last_sent_at else None,
+                "auto_signal_history": self._auto_signal_history[-20:],
+            }
+            target = self._marker_path()
+            target.parent.mkdir(parents=True, exist_ok=True)
+            temporary = target.with_suffix(".tmp")
+            temporary.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            temporary.replace(target)
 
     def _set_market_error(self, error: Exception | str) -> None:
         message = str(error)[:300]
@@ -429,6 +467,19 @@ class AutomationService:
             signal["automation_generated_at"] = format_datetime(now)
             signal["news_guard"] = guard
             self._latest_auto_signal = signal
+            with self._state_lock:
+                self._auto_signal_history.append({
+                    "signal_id": signal["signal_id"],
+                    "pair": signal["pair"],
+                    "side": signal["side"],
+                    "entry_time": signal["entry_time"],
+                    "prediction_time": signal["prediction_time"],
+                    "probability_up": signal.get("probability_up"),
+                    "reason": signal.get("reason"),
+                    "source": signal.get("source"),
+                    "heading": signal.get("heading"),
+                })
+                self._auto_signal_history = self._auto_signal_history[-20:]
             self._last_auto_status = (
                 f"Automatic analysis completed for {self.market_pair}; latest result: {signal['side']}. "
                 f"Entry {signal['entry_time']} → prediction {signal['prediction_time']}."
@@ -436,6 +487,7 @@ class AutomationService:
         except (ValueError, RuntimeError) as exc:
             self._last_auto_status = f"Automatic signal failed safely: {str(exc)[:240]}"
         self._save_marker()
+        self._maybe_post_automatic_signal()
 
     def pause_market_feed(self) -> None:
         with self._sync_lock:
@@ -510,6 +562,7 @@ class AutomationService:
                             _write_csv(new_candles, path)
                             result = self.runtime.append_csv_file(path, self.market_pair)
                         added = int(result["count"])
+                        self._post_outcome_results(result.get("auto_resolved") or [])
 
                 with self.runtime.lock:
                     latest = self.runtime.candles[-1] if self.runtime.candles else None
@@ -552,6 +605,306 @@ class AutomationService:
 
     def evaluate_news(self, pair: str) -> dict[str, Any]:
         return self.calendar.evaluate(pair)
+
+    # ---------------------------------------------------------------- Telegram
+    TELEGRAM_SIDE_LABEL = {"BUY": "CALL (BUY)", "SELL": "PUT (SELL)", "NO SIGNAL": "ABSTAIN"}
+
+    def telegram_message_text(self, signal: dict[str, Any]) -> str:
+        side = str(signal.get("side", "NO SIGNAL"))
+        source = str(signal.get("source") or "UNKNOWN")
+        probability = signal.get("probability_up")
+        probability_text = (
+            f"{float(probability) * 100:.1f}% up (model estimate, not calibrated)"
+            if probability is not None else "not available (rule gate only)"
+        )
+        entry = self._telegram_time(signal.get("entry_time") or signal.get("generated_at"))
+        expiry = self._telegram_time(signal.get("prediction_time") or signal.get("expires_at"))
+        horizon = signal.get("horizon") or 1
+        reason = str(signal.get("reason") or "No reason recorded.").strip()
+        if len(reason) > 260:
+            reason = reason[:257] + "..."
+        return (
+            "ORBIX — M1 RESEARCH SIGNAL\n"
+            f"{signal.get('pair', 'UNKNOWN')} · {self.TELEGRAM_SIDE_LABEL.get(side, side)}\n"
+            f"Entry: {entry}\n"
+            f"Expiry: {expiry} ({horizon} min)\n"
+            f"Data: {source}\n"
+            f"Model: {probability_text}\n"
+            f"Rule: {reason}\n"
+            f"ID: {signal.get('signal_id', '—')}\n\n"
+            "Research signal only. No order was placed. M1 calls can lose; no accuracy or outcome is guaranteed."
+        )
+
+    def telegram_batch_text(self, signals: list[dict[str, Any]], *, demo_included: bool = False) -> str:
+        rows = []
+        for signal in signals:
+            side = str(signal.get("side", ""))
+            direction = {"BUY": "CALL", "SELL": "PUT"}.get(side, "ABSTAIN")
+            rows.append(
+                f"M1; {signal.get('pair', 'UNKNOWN')}; {self._telegram_time(signal.get('entry_time'), clock_only=True)}; {direction}"
+            )
+        header = [
+            f"ORBIX — M1 BATCH ({len(signals)})",
+            f"Entry clock: {self.telegram_timezone_name}",
+            "",
+        ]
+        footer = [
+            "",
+            f"Strategy: {self.strategy_id}",
+            "Research signals only. No orders were placed. Calls can lose; no accuracy or outcome is guaranteed.",
+        ]
+        if demo_included:
+            footer.insert(0, "WARNING: this batch contains SYNTHETIC DEMO data and is not market evidence.")
+        return "\n".join(header + rows + footer)
+
+    def telegram_result_text(self, record: dict[str, Any], learned: bool | None = None) -> str:
+        side = str(record.get("side", ""))
+        outcome = str(record.get("outcome") or "UNRESOLVED")
+        exit_price = record.get("exit_price")
+        entry = self._telegram_time(record.get("entry_time") or record.get("generated_at"))
+        expiry = self._telegram_time(record.get("expires_at"), clock_only=True)
+        learning = (
+            "Model updated once after expiry." if learned
+            else "No model update for this outcome."
+        )
+        exit_text = f"{float(exit_price):.6g}" if exit_price is not None else "not recorded"
+        return (
+            "ORBIX — M1 PAPER RESULT\n"
+            f"{record.get('pair', 'UNKNOWN')} · {self.TELEGRAM_SIDE_LABEL.get(side, side)}\n"
+            f"Entry {entry} → expiry {expiry}\n"
+            f"Outcome: {outcome} · paper exit {exit_text}\n"
+            f"{learning}\n\n"
+            "Paper result from closed candles only. Not a live trade and not a prediction of future results."
+        )
+
+    def _telegram_time(self, value: Any, *, clock_only: bool = False) -> str:
+        if not value:
+            return "—"
+        try:
+            moment = parse_datetime(value) if isinstance(value, str) else value
+        except ValueError:
+            return str(value)
+        if moment is None:
+            return "—"
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=UTC)
+        local = moment.astimezone(self.telegram_timezone)
+        return local.strftime("%H:%M") if clock_only else f"{local.strftime('%H:%M')} {self.telegram_timezone_name}"
+
+    def telegram_status(self) -> dict[str, Any]:
+        with self._state_lock:
+            return {
+                "configured": self.telegram.configured,
+                "target_chat": self.telegram.chat_id or None,
+                "timezone": self.telegram_timezone_name,
+                "auto_post_enabled": self._telegram_auto_post_enabled and self.telegram.configured,
+                "sent_signal_count": len(self._telegram_signal_ids),
+                "sent_result_count": len(self._telegram_result_ids),
+                "sent_signal_ids": self._telegram_signal_ids[-20:],
+                "sent_result_ids": self._telegram_result_ids[-20:],
+                "last_sent_at": format_datetime(self._telegram_last_sent_at) if self._telegram_last_sent_at else None,
+                "last_message_id": self._telegram_last_message_id,
+                "last_error": self._telegram_last_error,
+                "can_auto_post": self.telegram.configured,
+            }
+
+    def set_telegram_auto_post(self, enabled: bool) -> dict[str, Any]:
+        if enabled and not self.telegram.configured:
+            raise TelegramError(
+                "Configure ORBIX_TELEGRAM_BOT_TOKEN and ORBIX_TELEGRAM_CHAT_ID before enabling automatic posting."
+            )
+        with self._state_lock:
+            self._telegram_auto_post_enabled = bool(enabled)
+        self._save_marker()
+        return self.telegram_status()
+
+    def send_telegram_test(self) -> dict[str, Any]:
+        result = self.telegram.send_message(
+            "ORBIX — Telegram channel connected.\n"
+            "This channel is now the configured target for M1 research signals. "
+            "Automatic posting stays off until you enable it on the Telegram page. "
+            "No orders are executed and no accuracy is promised."
+        )
+        with self._state_lock:
+            self._telegram_last_error = None
+            self._telegram_last_sent_at = datetime.now(UTC)
+            self._telegram_last_message_id = result.get("message_id")
+        self._save_marker()
+        return {"status": "sent", **result}
+
+    def _telegram_candidates(self) -> list[dict[str, Any]]:
+        pool: list[dict[str, Any]] = []
+        with self._state_lock:
+            history = list(reversed(self._auto_signal_history))
+        pool.extend(history)
+        try:
+            rows = self.runtime.ledger.list_recent(40)
+        except Exception:
+            rows = []
+        for row in rows:
+            pool.append({
+                **row,
+                "entry_time": row.get("entry_time") or row.get("generated_at"),
+                "prediction_time": row.get("expires_at"),
+                "heading": f"{row.get('strategy', 'signal')} · {row.get('side')}",
+            })
+        deduped: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for item in pool:
+            signal_id = str(item.get("signal_id") or "")
+            if not signal_id or signal_id in seen:
+                continue
+            seen.add(signal_id)
+            deduped.append(item)
+        return deduped
+
+    def send_telegram_batch(
+        self,
+        *,
+        signal_ids: list[str] | None = None,
+        limit: int = 5,
+        include_demo: bool = False,
+        force: bool = False,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        limit = max(1, min(int(limit), 10))
+        if not dry_run and not self.telegram.configured:
+            raise TelegramError(
+                "Set ORBIX_TELEGRAM_BOT_TOKEN and ORBIX_TELEGRAM_CHAT_ID on the server before sending."
+            )
+        candidates = self._telegram_candidates()
+        if signal_ids:
+            wanted = {str(item) for item in signal_ids}
+            candidates = [item for item in candidates if str(item.get("signal_id")) in wanted]
+        with self._state_lock:
+            already_sent = set(self._telegram_signal_ids)
+            inflight = set(self._telegram_inflight_signal_ids)
+
+        selected: list[dict[str, Any]] = []
+        skipped: list[dict[str, str]] = []
+        for item in candidates:
+            signal_id = str(item.get("signal_id"))
+            if str(item.get("side")) not in {"BUY", "SELL"}:
+                skipped.append({"signal_id": signal_id, "reason": "abstained (NO SIGNAL)"})
+                continue
+            if str(item.get("source")) == "SYNTHETIC DEMO" and not include_demo:
+                skipped.append({"signal_id": signal_id, "reason": "synthetic demo data; enable demo transmission explicitly"})
+                continue
+            if signal_id in already_sent and not force:
+                skipped.append({"signal_id": signal_id, "reason": "already sent"})
+                continue
+            if signal_id in inflight:
+                skipped.append({"signal_id": signal_id, "reason": "send already in progress"})
+                continue
+            selected.append(item)
+            if len(selected) >= limit:
+                break
+
+        if not selected:
+            return {
+                "status": "nothing_to_send",
+                "sent": [],
+                "skipped": skipped[:12],
+                "message": "No unsent, non-abstained signals are available. Generate a signal first.",
+            }
+
+        demo_included = any(str(item.get("source")) == "SYNTHETIC DEMO" for item in selected)
+        text = (
+            self.telegram_batch_text(selected, demo_included=demo_included)
+            if len(selected) > 1
+            else self.telegram_message_text(selected[0])
+        )
+        ids = [str(item.get("signal_id")) for item in selected]
+        if dry_run:
+            return {"status": "preview", "sent": [], "preview_ids": ids, "text": text, "skipped": skipped[:12]}
+
+        with self._state_lock:
+            self._telegram_inflight_signal_ids.update(ids)
+        try:
+            result = self.telegram.send_message(text)
+        except TelegramError as exc:
+            with self._state_lock:
+                self._telegram_inflight_signal_ids.difference_update(ids)
+                self._telegram_last_error = str(exc)[:300]
+            raise
+        with self._state_lock:
+            self._telegram_inflight_signal_ids.difference_update(ids)
+            for signal_id in ids:
+                if signal_id not in self._telegram_signal_ids:
+                    self._telegram_signal_ids.append(signal_id)
+            self._telegram_signal_ids = self._telegram_signal_ids[-500:]
+            self._telegram_last_error = None
+            self._telegram_last_sent_at = datetime.now(UTC)
+            self._telegram_last_message_id = result.get("message_id")
+        self._save_marker()
+        return {"status": "sent", "sent": ids, "skipped": skipped[:12], **result}
+
+    def _maybe_post_automatic_signal(self) -> None:
+        with self._state_lock:
+            enabled = self._telegram_auto_post_enabled and self.telegram.configured
+            signal = dict(self._latest_auto_signal) if self._latest_auto_signal else None
+        if not enabled or not signal:
+            return
+        if str(signal.get("side")) not in {"BUY", "SELL"}:
+            return
+        if str(signal.get("source")) == "SYNTHETIC DEMO":
+            return
+        signal_id = str(signal.get("signal_id"))
+        with self._state_lock:
+            if signal_id in self._telegram_signal_ids or signal_id in self._telegram_inflight_signal_ids:
+                return
+            self._telegram_inflight_signal_ids.add(signal_id)
+        try:
+            result = self.telegram.send_message(self.telegram_message_text(signal))
+        except TelegramError as exc:
+            with self._state_lock:
+                self._telegram_inflight_signal_ids.discard(signal_id)
+                self._telegram_last_error = str(exc)[:300]
+            self._save_marker()
+            return
+        with self._state_lock:
+            self._telegram_inflight_signal_ids.discard(signal_id)
+            if signal_id not in self._telegram_signal_ids:
+                self._telegram_signal_ids.append(signal_id)
+            self._telegram_signal_ids = self._telegram_signal_ids[-500:]
+            self._telegram_last_error = None
+            self._telegram_last_sent_at = datetime.now(UTC)
+            self._telegram_last_message_id = result.get("message_id")
+        self._save_marker()
+
+    def _post_outcome_results(self, outcomes: list[dict[str, Any]]) -> None:
+        if not outcomes or not self.telegram.configured:
+            return
+        for outcome in outcomes:
+            signal_id = str(outcome.get("signal_id") or "")
+            if not signal_id:
+                continue
+            with self._state_lock:
+                if signal_id not in self._telegram_signal_ids or signal_id in self._telegram_result_ids:
+                    continue
+                if signal_id in self._telegram_inflight_result_ids:
+                    continue
+                self._telegram_inflight_result_ids.add(signal_id)
+            try:
+                record = self.runtime.ledger.get(signal_id)
+                if not record:
+                    raise TelegramError("Signal record was not found for the result message.")
+                result = self.telegram.send_message(
+                    self.telegram_result_text(record, learned=bool(outcome.get("learned")))
+                )
+            except TelegramError as exc:
+                with self._state_lock:
+                    self._telegram_inflight_result_ids.discard(signal_id)
+                    self._telegram_last_error = str(exc)[:300]
+                continue
+            with self._state_lock:
+                self._telegram_inflight_result_ids.discard(signal_id)
+                self._telegram_result_ids.append(signal_id)
+                self._telegram_result_ids = self._telegram_result_ids[-500:]
+                self._telegram_last_error = None
+                self._telegram_last_sent_at = datetime.now(UTC)
+                self._telegram_last_message_id = result.get("message_id")
+        self._save_marker()
 
     def _next_market_delay(self) -> float:
         if self.refresh_seconds == 60:
@@ -663,6 +1016,8 @@ class AutomationService:
             "calendar": {**calendar_status, "guard": guard},
             "auto_status": auto_message,
             "latest_auto_signal": auto_signal,
+            "recent_auto_signals": list(self._auto_signal_history[-10:]),
+            "telegram": self.telegram_status(),
             "limits": {
                 "entry_late_seconds": self.max_entry_delay_seconds,
                 "news_blackout_before_minutes": int(self.calendar.blackout_before.total_seconds() // 60),

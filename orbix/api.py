@@ -14,8 +14,10 @@ from pydantic import BaseModel, Field
 
 from .automation import AutomationService, ProviderError
 from .backtest import run_walk_forward_backtest
+from .future import build_future_plan
 from .runtime import BACKTEST_WINDOW, runtime
 from .strategies import strategy_catalog_payload
+from .telegram import TelegramError
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -38,7 +40,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Orbix Signal Lab",
     description="A signal-only research and paper-testing dashboard. No broker orders are sent.",
-    version="0.2.0",
+    version="0.3.0",
     lifespan=lifespan,
 )
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
@@ -61,6 +63,24 @@ class BacktestRequest(BaseModel):
 class FeedbackRequest(BaseModel):
     signal_id: str
     exit_price: float = Field(gt=0)
+
+
+class TelegramSendRequest(BaseModel):
+    signal_ids: list[str] = Field(default_factory=list, max_length=10)
+    limit: int = Field(default=5, ge=1, le=10)
+    include_demo: bool = False
+    force: bool = False
+    dry_run: bool = False
+
+
+class TelegramAutoRequest(BaseModel):
+    enabled: bool
+
+
+def _telegram_http_error(exc: TelegramError) -> HTTPException:
+    message = str(exc)
+    status_code = 409 if message.startswith("Set ORBIX_") or message.startswith("Configure ORBIX_") else 502
+    return HTTPException(status_code=status_code, detail=message)
 
 
 async def _with_streamed_csv(request: Request, max_bytes: int, processor: Callable[[Path], dict]) -> dict:
@@ -148,6 +168,78 @@ async def refresh_calendar() -> dict:
         return await asyncio.to_thread(automation.sync_calendar)
     except ProviderError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/api/telegram/status")
+def telegram_status() -> dict:
+    state = automation.status()
+    return {
+        **state["telegram"],
+        "recent_signals": state["recent_auto_signals"],
+        "latest_auto_signal": state["latest_auto_signal"],
+        "automatic_signals_active": state["automatic_signals_active"],
+        "setup": {
+            "bot_token_env": "ORBIX_TELEGRAM_BOT_TOKEN",
+            "chat_id_env": "ORBIX_TELEGRAM_CHAT_ID",
+            "timezone_env": "ORBIX_TELEGRAM_TIMEZONE",
+            "auto_post_env": "ORBIX_TELEGRAM_AUTO_POST",
+            "steps": [
+                "Create the bot with @BotFather and copy its token into ORBIX_TELEGRAM_BOT_TOKEN.",
+                "Add the bot to the target channel as an administrator with 'Post messages'.",
+                "Use the numeric -100... channel id (or @channelusername) in ORBIX_TELEGRAM_CHAT_ID.",
+                "Restart the server, then press TEST CONNECTION before the one-click send.",
+            ],
+        },
+    }
+
+
+@app.post("/api/telegram/send")
+def telegram_send(payload: TelegramSendRequest) -> dict:
+    try:
+        return automation.send_telegram_batch(
+            signal_ids=payload.signal_ids or None,
+            limit=payload.limit,
+            include_demo=payload.include_demo,
+            force=payload.force,
+            dry_run=payload.dry_run,
+        )
+    except TelegramError as exc:
+        raise _telegram_http_error(exc) from exc
+
+
+@app.post("/api/telegram/test")
+def telegram_test() -> dict:
+    try:
+        return automation.send_telegram_test()
+    except TelegramError as exc:
+        raise _telegram_http_error(exc) from exc
+
+
+@app.post("/api/telegram/auto")
+def telegram_auto(payload: TelegramAutoRequest) -> dict:
+    try:
+        return automation.set_telegram_auto_post(payload.enabled)
+    except TelegramError as exc:
+        raise _telegram_http_error(exc) from exc
+
+
+@app.get("/api/future/plan")
+def future_plan(pair: str | None = None, count: int = 6) -> dict:
+    count = max(1, min(count, 8))
+    if pair:
+        requested = pair.upper().strip()
+        if requested != runtime.pair:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"The active dataset is {runtime.pair}. Import {requested} candles from the Data page "
+                    "before switching the single-pair view."
+                ),
+            )
+    try:
+        return build_future_plan(runtime, automation, count=count)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
