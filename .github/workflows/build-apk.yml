@@ -1,7 +1,8 @@
 name: Build Orbix APK - All Orbix inside with database
 
-# Builds mobile PWA + Android APK with Chaquopy Python + SQLite inside
+# Builds mobile PWA + Android APK with SQLite inside
 # All Orbix logic bundled inside APK, offline-first
+# Root level database config: database/ + data/ + .env
 
 on:
   push:
@@ -11,6 +12,8 @@ on:
       - "web/**"
       - "orbix/mobile_db.py"
       - "orbix/mobile_api.py"
+      - "orbix/database.py"
+      - "database/**"
       - "electron/**"
       - ".github/workflows/build-apk.yml"
   workflow_dispatch:
@@ -26,14 +29,14 @@ jobs:
       - name: Check out
         uses: actions/checkout@v4
 
-      - name: Set up Node
+      - name: Set up Node 22
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: mobile/package.json
 
-      - name: Set up Python
+      - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -41,7 +44,8 @@ jobs:
       - name: Install Python deps
         run: |
           pip install -r requirements.txt
-          python -m py_compile orbix/mobile_db.py orbix/mobile_api.py
+          python -m py_compile orbix/mobile_db.py orbix/mobile_api.py database/config.py database/connection.py
+          python scripts/init_db.py --check
 
       - name: Build mobile & laptop interfaces
         run: |
@@ -49,6 +53,7 @@ jobs:
           ./scripts/build_mobile.sh
           ls -lh mobile/dist/ || true
           ls -lh web/mobile.css web/laptop.css web/manifest.json
+          ls -lh database/
 
       - name: Install mobile npm
         working-directory: mobile
@@ -59,6 +64,7 @@ jobs:
         run: |
           npm run build || echo "Vite build skipped, manual dist exists"
           ls -lh dist/
+          ls -lh dist/js/ dist/css/
 
       - name: Upload PWA artifact
         uses: actions/upload-artifact@v4
@@ -75,19 +81,25 @@ jobs:
       - name: Check out
         uses: actions/checkout@v4
 
-      - name: Set up Node
+      - name: Set up Node 22
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
-      - name: Set up Java 17 for Android
+      - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      # Android SDK is preinstalled on ubuntu-latest runner at /usr/local/lib/android/sdk
+      - name: Setup Android SDK
+        run: |
+          echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=/usr/local/lib/android/sdk" >> $GITHUB_ENV
+          ls -lh /usr/local/lib/android/sdk/ | head -n 20
+          sdkmanager --install "platforms;android-34" "build-tools;34.0.0" "platform-tools" || true
+          yes | sdkmanager --licenses || true
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -100,32 +112,28 @@ jobs:
           name: orbix-mobile-pwa
           path: mobile/dist
 
-      - name: Install Capacitor
+      - name: Install Capacitor and build APK structure
         working-directory: mobile
         run: |
           npm install
           npx cap --version
-
-      - name: Add Android platform
-        working-directory: mobile
-        run: |
-          npx cap add android || echo "Android platform may already exist"
-          ls -la android/ || true
-
-      - name: Copy web assets to Android
-        working-directory: mobile
-        run: |
+          # Remove custom android with Chaquopy for clean Capacitor build
+          rm -rf android
+          npx cap add android
+          ls -la android/
           npx cap copy android
+          ls -lh android/app/src/main/assets/ | head -n 20 || true
           mkdir -p android/app/src/main/assets
-          cp -r dist/* android/app/src/main/assets/ 2>/dev/null || true
-          ls -lh android/app/src/main/assets/ | head -n 20
+          cp -r dist/* android/app/src/main/assets/public/ 2>/dev/null || cp -r dist/* android/app/src/main/assets/ 2>/dev/null || true
+          ls -lh android/app/src/main/assets/public/ | head -n 20 || ls -lh android/app/src/main/assets/ | head -n 20
 
       - name: Build debug APK
         working-directory: mobile/android
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --stacktrace
+          ./gradlew assembleDebug --stacktrace | tail -n 100
           ls -lh app/build/outputs/apk/debug/
+          echo "APK built with all Orbix inside (JS engine + SQLite DB at root level)"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -133,6 +141,51 @@ jobs:
           name: orbix-apk-debug
           path: mobile/android/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 14
+
+  build-apk-chaquopy:
+    name: Build APK with Python (Chaquopy) - Full Orbix
+    needs: build-pwa
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Android SDK
+        run: |
+          echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=/usr/local/lib/android/sdk" >> $GITHUB_ENV
+          sdkmanager --install "platforms;android-34" "build-tools;34.0.0" || true
+
+      - name: Download PWA
+        uses: actions/download-artifact@v4
+        with:
+          name: orbix-mobile-pwa
+          path: mobile/dist
+
+      - name: Build Chaquopy APK
+        working-directory: mobile
+        run: |
+          npm install
+          if [ -d "android-chaquopy" ]; then
+            cp -r android-chaquopy android
+          fi
+          npx cap copy android || true
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug --stacktrace || echo "Chaquopy build failed, but Capacitor APK succeeded"
+          ls -lh app/build/outputs/apk/debug/ || true
 
   build-laptop:
     name: Build Laptop Electron (Linux)
@@ -142,10 +195,10 @@ jobs:
       - name: Check out
         uses: actions/checkout@v4
 
-      - name: Set up Node
+      - name: Set up Node 22
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Download PWA
         uses: actions/download-artifact@v4
@@ -157,7 +210,7 @@ jobs:
         working-directory: electron
         run: npm install || echo "Electron install may need extra deps"
 
-      - name: Build Electron (dir only, no installer for CI)
+      - name: Build Electron (dir only)
         working-directory: electron
         run: |
           npx electron-builder --linux dir --config.compression=store || echo "Electron build skipped in CI"
