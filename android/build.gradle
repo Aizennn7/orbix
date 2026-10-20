@@ -1,0 +1,5 @@
+// Orbix for Android builds with the Android Gradle Plugin only. There are no
+// app dependencies: the UI is a WebView and everything else ships as assets.
+plugins {
+    id 'com.android.application' version '8.6.1' apply false
+}

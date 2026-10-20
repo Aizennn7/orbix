@@ -1,0 +1,128 @@
+name: Build Android APK
+
+# The APK is built here, not on a developer machine: this sandbox has no Android
+# SDK, and the runner image ships one. The finished file is attached to the
+# "android-latest" release so it can be sideloaded straight from GitHub.
+
+on:
+  push:
+    branches:
+      - main
+      - arena/8f21adda-orbix
+    paths:
+      - "android/**"
+      - ".github/workflows/android.yml"
+      - "docs/**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: android-apk
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
+
+      - name: Install SDK components
+        run: |
+          SDKMANAGER="$(command -v sdkmanager || true)"
+          if [ -z "$SDKMANAGER" ]; then
+            SDKMANAGER="$(ls "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -1 || true)"
+          fi
+          if [ -z "$SDKMANAGER" ]; then
+            echo "sdkmanager not found; assuming the image already has what we need"
+            exit 0
+          fi
+          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+          "$SDKMANAGER" "platforms;android-34" "build-tools;34.0.0" > /dev/null 2>&1 || true
+
+      - name: Assemble debug APK
+        working-directory: android
+        run: |
+          set -o pipefail
+          gradle assembleDebug --no-daemon --stacktrace 2>&1 | tee /tmp/build.log
+
+      - name: Inspect the APK
+        run: |
+          set -euo pipefail
+          APK="android/app/build/outputs/apk/debug/app-debug.apk"
+          ls -lh "$APK"
+          BUILD_TOOLS="$(ls -d "$ANDROID_HOME"/build-tools/* 2>/dev/null | sort -V | tail -1)"
+          "$BUILD_TOOLS/aapt" dump badging "$APK" | head -12 > /tmp/badging.txt
+          cat /tmp/badging.txt
+          echo "--- bundled assets ---"
+          unzip -l "$APK" | grep -E "assets/index.html|assets/api-data/market.json|assets/app.js|classes.dex" || true
+          cp "$APK" orbix.apk
+          sha256sum orbix.apk | tee /tmp/sha.txt
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: orbix-apk
+          path: orbix.apk
+          if-no-files-found: error
+
+      - name: Publish to the android-latest release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view android-latest > /dev/null 2>&1 || \
+            gh release create android-latest \
+              --title "Orbix for Android" \
+              --prerelease \
+              --notes "Signed with a debug key — sideload only, not for the Play Store.
+
+          The APK runs the dashboard in two modes: if the Termux-hosted server answers on 127.0.0.1:8000 it loads the live app, otherwise it runs the bundled read-only snapshot offline. See TERMUX.md."
+          gh release upload android-latest orbix.apk --clobber
+
+      - name: Report to the pull request
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ github.ref_name }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          PR="$(gh pr list --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)"
+          if [ -z "$PR" ]; then
+            echo "no open pull request for $BRANCH; skipping comment"
+            exit 0
+          fi
+          {
+            echo "### Android build: ${JOB_STATUS}"
+            echo
+            if [ -s /tmp/badging.txt ]; then
+              echo '```'
+              cat /tmp/badging.txt
+              echo '```'
+            fi
+            if [ -s /tmp/sha.txt ]; then
+              echo "sha256: \`$(cut -d' ' -f1 /tmp/sha.txt)\`"
+            fi
+            if [ "$JOB_STATUS" != "success" ] && [ -s /tmp/build.log ]; then
+              echo
+              echo "<details><summary>build log (tail)</summary>"
+              echo
+              echo '```'
+              tail -n 80 /tmp/build.log
+              echo '```'
+              echo "</details>"
+            fi
+          } > /tmp/comment.md
+          gh pr comment "$PR" --body-file /tmp/comment.md

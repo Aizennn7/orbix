@@ -1,0 +1,39 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.aizennn7.orbix'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.aizennn7.orbix'
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+    }
+
+    // The published static snapshot in docs/ becomes the bundled offline copy,
+    // so the app and the GitHub Pages site never drift apart.
+    sourceSets {
+        main {
+            assets.srcDirs += ['../../docs']
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+
+    lint {
+        abortOnError false
+    }
+}
