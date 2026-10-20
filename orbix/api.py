@@ -16,6 +16,7 @@ from .backtest import run_walk_forward_backtest
 from .brokers import capabilities as broker_capabilities
 from .brokers import pocket_option_ticket
 from .domain import parse_datetime
+from .env import load_env
 from .future import build_future_plan
 from .runtime import BACKTEST_WINDOW, Runtime
 from .strategies import strategy_catalog_payload
@@ -26,6 +27,10 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB_DIR = ROOT / "web"
 MAX_IMPORT_BYTES = 1024 * 1024 * 1024
 MAX_APPEND_BYTES = 64 * 1024 * 1024
+
+# Load ORBIX root .env before Runtime or AutomationService read configuration.
+# Real process variables keep precedence, so `uvicorn --env-file` still works.
+ENV_FILE = load_env()
 
 # Created here rather than in runtime.py so importing Runtime (tests, tooling)
 # does not open the live data store or fight a running preview for the lock.
@@ -147,6 +152,7 @@ def health() -> dict:
             "online_learning_updates": runtime.ledger.learning_summary()["online_updates"],
             "automatic_signals_active": automation_state["automatic_signals_active"],
             "clock": automation_state.get("clock"),
+            "env_file_loaded": ENV_FILE is not None,
         }
 
 
