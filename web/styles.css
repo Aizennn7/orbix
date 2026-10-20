@@ -864,3 +864,72 @@ h2 { font-size: 18px; font-weight: 530; letter-spacing: -.035em; margin: 0; }
 .env-guide .micro-copy {
   margin: 0;
 }
+
+.provider-credential-list {
+  display: grid;
+  gap: 11px;
+  margin: 16px 0 4px;
+}
+
+.provider-credential {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .024);
+}
+
+.provider-credential-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.provider-credential-head span {
+  color: var(--dim);
+  font-size: 8px;
+  letter-spacing: .13em;
+}
+
+.provider-credential-head strong {
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: .1em;
+  white-space: nowrap;
+}
+
+.provider-credential-head strong.is-accessible {
+  color: white;
+  text-shadow: 0 0 12px rgba(255, 255, 255, .45);
+}
+
+.provider-credential small {
+  color: var(--muted);
+  font-size: 8px;
+  line-height: 1.65;
+}
+
+.provider-credential .field-label {
+  margin: 2px 0 0;
+}
+
+.provider-credential .provider-input:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+}
+
+.env-guide > summary {
+  margin: 0;
+  cursor: pointer;
+}
+
+.env-guide > summary::marker {
+  color: var(--dim);
+}
+
+.env-guide[open] > summary {
+  margin-bottom: 8px;
+}

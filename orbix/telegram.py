@@ -31,6 +31,48 @@ class TelegramNotifier:
             "target_chat": self.chat_id or None,
         }
 
+    def probe(self) -> dict[str, Any]:
+        """Check bot identity and posting rights without sending a message."""
+        if not self.configured:
+            return {"accessible": None, "message": "Bot token and chat id are both required."}
+        try:
+            identity = self._call("getMe", {}, "Telegram bot check").get("result") or {}
+            chat = self._call("getChat", {"chat_id": self.chat_id}, "Telegram chat check").get("result") or {}
+        except TelegramError as exc:
+            return {"accessible": False, "message": str(exc)[:240]}
+        bot_id = identity.get("id")
+        chat_type = str(chat.get("type") or "")
+        chat_label = str(chat.get("title") or chat.get("username") or chat.get("first_name") or self.chat_id)
+        if chat_type in {"channel", "group", "supergroup"} and bot_id:
+            try:
+                member = self._call(
+                    "getChatMember",
+                    {"chat_id": self.chat_id, "user_id": bot_id},
+                    "Telegram permission check",
+                ).get("result") or {}
+            except TelegramError as exc:
+                return {"accessible": False, "message": str(exc)[:240]}
+            member_status = str(member.get("status") or "")
+            if member_status in {"", "left", "kicked"}:
+                return {
+                    "accessible": False,
+                    "message": f"Bot is not a member of {chat_label}; add it before posting.",
+                }
+            if chat_type == "channel":
+                if member_status not in {"administrator", "creator"}:
+                    return {
+                        "accessible": False,
+                        "message": f"Bot is not an administrator of {chat_label}; it cannot post there.",
+                    }
+                if member.get("can_post_messages") is False:
+                    return {"accessible": False, "message": f"Bot cannot post messages in {chat_label}."}
+            elif member_status == "restricted" and member.get("can_send_messages") is False:
+                return {"accessible": False, "message": f"Bot is restricted from posting in {chat_label}."}
+        return {
+            "accessible": True,
+            "message": f"Bot @{identity.get('username') or bot_id} can reach {chat_label}.",
+        }
+
     def send_message(self, text: str) -> dict[str, Any]:
         payload = self._call(
             "sendMessage",

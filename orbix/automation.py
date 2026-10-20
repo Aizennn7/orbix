@@ -61,6 +61,44 @@ class TwelveDataCsvProvider:
     def configured(self) -> bool:
         return bool(self.api_key)
 
+    def probe(self, symbol: str = "EUR/USD") -> dict[str, Any]:
+        """Check the key without importing or storing any candles."""
+        if not self.configured:
+            return {"accessible": None, "message": "No market key configured."}
+        query = urlencode({
+            "symbol": symbol,
+            "interval": "1min",
+            "outputsize": 1,
+            "timezone": "UTC",
+            "order": "ASC",
+            "format": "CSV",
+            "delimiter": ",",
+            "apikey": self.api_key,
+        })
+        try:
+            body, content_type = _read_url(
+                f"{TWELVE_DATA_URL}?{query}", "text/csv,application/json", timeout=8.0
+            )
+        except ProviderError as exc:
+            message = str(exc)
+            if "HTTP 401" in message or "HTTP 403" in message:
+                return {"accessible": False, "message": "Twelve Data rejected the key (HTTP 401/403)."}
+            if "HTTP 429" in message:
+                return {"accessible": False, "message": "Twelve Data rate-limited the check (HTTP 429); try again shortly."}
+            return {"accessible": False, "message": message[:240]}
+        text = body.decode("utf-8-sig", errors="replace").strip()
+        if "json" in content_type.lower() or text.startswith("{"):
+            try:
+                payload = json.loads(text)
+            except json.JSONDecodeError:
+                return {"accessible": False, "message": "Twelve Data returned an unreadable response."}
+            message = str(payload.get("message", payload.get("code", "provider error")))[:220]
+            return {"accessible": False, "message": f"Twelve Data rejected the check: {message}"}
+        lines = [line for line in text.splitlines() if line.strip()]
+        if len(lines) >= 2 and "timestamp" in lines[0].lower():
+            return {"accessible": True, "message": "Market feed reachable with this key."}
+        return {"accessible": False, "message": "Twelve Data returned an unexpected response shape."}
+
     def fetch_candles(self, pair: str, outputsize: int = 500) -> list[Candle]:
         if not self.configured:
             raise ProviderError("Set ORBIX_TWELVE_DATA_API_KEY on the server to connect the M1 feed.")
@@ -126,6 +164,36 @@ class FinnhubEconomicCalendar:
     @property
     def configured(self) -> bool:
         return bool(self.api_key)
+
+    def probe(self) -> dict[str, Any]:
+        """Check whether this key can read the economic calendar."""
+        if not self.configured:
+            return {"accessible": None, "message": "No calendar key configured."}
+        today = datetime.now(UTC).date()
+        query = urlencode({"from": today.isoformat(), "to": today.isoformat(), "token": self.api_key})
+        try:
+            body, _ = _read_url(f"{FINNHUB_ECONOMIC_URL}?{query}", "application/json", timeout=8.0)
+        except ProviderError as exc:
+            message = str(exc)
+            if "HTTP 401" in message:
+                return {"accessible": False, "message": "Finnhub rejected the key (HTTP 401)."}
+            if "HTTP 403" in message:
+                return {
+                    "accessible": False,
+                    "message": "Key rejected, or the economic calendar needs a paid Finnhub plan (HTTP 403).",
+                }
+            return {"accessible": False, "message": message[:240]}
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return {"accessible": False, "message": "Finnhub returned invalid calendar JSON."}
+        if not isinstance(payload, dict):
+            return {"accessible": False, "message": "Finnhub returned an unexpected response."}
+        if payload.get("error"):
+            return {"accessible": False, "message": f"Finnhub calendar error: {str(payload['error'])[:220]}"}
+        if isinstance(payload.get("economicCalendar"), list):
+            return {"accessible": True, "message": "Economic calendar reachable with this key."}
+        return {"accessible": False, "message": "Finnhub response did not contain an economicCalendar list."}
 
     def refresh(self, now: datetime | None = None) -> int:
         if not self.configured:
@@ -303,17 +371,7 @@ class AutomationService:
         self.market_pair = os.getenv("ORBIX_MARKET_PAIR", "EUR/USD").upper().strip()
         self.market_provider = TwelveDataCsvProvider(os.getenv("ORBIX_TWELVE_DATA_API_KEY"))
         self._calendar_config_error: str | None = None
-        try:
-            self.calendar = FinnhubEconomicCalendar(
-                os.getenv("ORBIX_FINNHUB_API_KEY"),
-                timezone_name=os.getenv("ORBIX_FINNHUB_TIMEZONE", "UTC"),
-                blackout_before_minutes=_env_int("ORBIX_NEWS_BEFORE_MINUTES", 15, 0, 180),
-                blackout_after_minutes=_env_int("ORBIX_NEWS_AFTER_MINUTES", 30, 0, 360),
-            )
-        except ValueError as exc:
-            self._calendar_config_error = str(exc)
-            self.calendar = FinnhubEconomicCalendar(None, timezone_name="UTC")
-            self.calendar.record_refresh_error(self._calendar_config_error)
+        self.calendar = self._make_calendar(os.getenv("ORBIX_FINNHUB_API_KEY"))
         self.refresh_seconds = _env_int("ORBIX_MARKET_REFRESH_SECONDS", 60, 60, 3600)
         self.calendar_refresh_seconds = _env_int("ORBIX_NEWS_REFRESH_SECONDS", 900, 300, 86400)
         self.max_entry_delay_seconds = _env_int("ORBIX_MAX_ENTRY_DELAY_SECONDS", 10, 1, 30)
@@ -372,6 +430,41 @@ class AutomationService:
         self._market_connected = False
         self._last_added_candles = 0
         self._load_marker()
+
+    def _make_calendar(self, api_key: str | None) -> "FinnhubEconomicCalendar":
+        try:
+            calendar = FinnhubEconomicCalendar(
+                api_key,
+                timezone_name=os.getenv("ORBIX_FINNHUB_TIMEZONE", "UTC"),
+                blackout_before_minutes=_env_int("ORBIX_NEWS_BEFORE_MINUTES", 15, 0, 180),
+                blackout_after_minutes=_env_int("ORBIX_NEWS_AFTER_MINUTES", 30, 0, 360),
+            )
+        except ValueError as exc:
+            self._calendar_config_error = str(exc)
+            calendar = FinnhubEconomicCalendar(None, timezone_name="UTC")
+            calendar.record_refresh_error(self._calendar_config_error)
+        else:
+            self._calendar_config_error = None
+        return calendar
+
+    def apply_provider_config(self, values: dict[str, str]) -> None:
+        """Set provider credentials on the live service without a restart.
+
+        The feed and calendar read their keys per request, so replacing the
+        attributes takes effect on the next sync. A changed calendar key starts
+        a fresh cache instead of mixing responses from two accounts.
+        """
+        market_key = str(values.get("twelve_data_api_key") or "").strip()
+        if market_key != self.market_provider.api_key:
+            self.market_provider.api_key = market_key
+        calendar_key = str(values.get("finnhub_api_key") or "").strip()
+        if calendar_key != self.calendar.api_key:
+            self.calendar = self._make_calendar(calendar_key)
+        token = str(values.get("telegram_bot_token") or "").strip()
+        chat_id = str(values.get("telegram_chat_id") or "").strip()
+        if (token, chat_id) != (self.telegram.bot_token, self.telegram.chat_id):
+            self.telegram = TelegramNotifier(token, chat_id)
+            self._telegram_last_error = self._telegram_timezone_error
 
     def _marker_path(self) -> Path:
         return self.runtime.data_dir / "automation_feed.json"

@@ -10,7 +10,7 @@ const ROUTES = {
   telegram: "Telegram channel",
   trader: "Trader discipline",
 };
-const state = { market: null, strategies: null, lastSignal: null, route: "dashboard", botClock: null, brokerTicket: null, providerKeys: [""], providerConfig: null, lastBacktestKey: null, backtestTimer: null, backtestRunning: false, automation: null, lastAutoSignalId: null, lastAutoCandleTimestamp: null, notificationsEnabled: false, toastTimer: null, telegram: null, telegramBusy: false, future: null, futureBusy: false, abstentions: null, modelSource: null, trader: null };
+const state = { market: null, strategies: null, lastSignal: null, route: "dashboard", botClock: null, brokerTicket: null, providers: null, providersBusy: false, providerClearArmed: false, providerClearTimer: null, lastBacktestKey: null, backtestTimer: null, backtestRunning: false, automation: null, lastAutoSignalId: null, lastAutoCandleTimestamp: null, notificationsEnabled: false, toastTimer: null, telegram: null, telegramBusy: false, future: null, futureBusy: false, abstentions: null, modelSource: null, trader: null };
 const $ = (selector) => document.querySelector(selector);
 
 async function api(path, options = {}) {
@@ -859,52 +859,81 @@ async function loadStrategies() {
   } catch (_) { /* default option remains */ }
 }
 
-function updateProviderKeyCount() {
-  const activeKeys = state.providerKeys.filter((key) => key.trim()).length;
-  $("#providerKeyCount").textContent = `${activeKeys} / 20 active · ${state.providerKeys.length} slot${state.providerKeys.length === 1 ? "" : "s"}`;
-  $("#addKeyButton").disabled = state.providerKeys.length >= 20;
-  $("#addKeyButton").innerHTML = state.providerKeys.length >= 20 ? "20 KEY LIMIT" : "ADD KEY <span>＋</span>";
+const PROVIDER_CARDS = [
+  {
+    provider: "market",
+    state: "#marketCredentialState",
+    note: "#marketCredentialNote",
+    inputs: [{ selector: "#twelveDataKey", field: "twelve_data_api_key", placeholder: "Paste the Twelve Data API key" }],
+    fallback: "Used for completed M1 candles. Without it the live feed stays off; imported CSV data still works.",
+  },
+  {
+    provider: "calendar",
+    state: "#calendarCredentialState",
+    note: "#calendarCredentialNote",
+    inputs: [{ selector: "#finnhubKey", field: "finnhub_api_key", placeholder: "Paste the Finnhub API key" }],
+    fallback: "Used to pause signals around high-impact events. Calendar access may require a paid Finnhub plan.",
+  },
+  {
+    provider: "telegram",
+    state: "#telegramCredentialState",
+    note: "#telegramCredentialNote",
+    inputs: [
+      { selector: "#telegramBotToken", field: "telegram_bot_token", placeholder: "Paste the bot token from BotFather" },
+      { selector: "#telegramChatId", field: "telegram_chat_id", placeholder: "e.g. -1001234567890" },
+    ],
+    fallback: "The bot must be an administrator of the channel with permission to post messages.",
+  },
+];
+
+function providerStateText(provider) {
+  if (!provider) return "UNKNOWN";
+  if (!provider.configured) return "NOT CONNECTED";
+  if (provider.accessible === true) return "ACCESSIBLE";
+  if (provider.accessible === false) return "NOT ACCESSIBLE";
+  return "SAVED · NOT TESTED";
 }
 
 function renderCreditDashboard() {
-  const activeKeys = state.providerKeys
-    .map((value, index) => ({ value: value.trim(), index }))
-    .filter((key) => key.value);
-  const count = `${activeKeys.length} / 20`;
+  const payload = state.providers;
+  const providers = payload?.providers ? Object.values(payload.providers) : [];
+  const configured = providers.filter((provider) => provider.configured).length;
+  const accessible = providers.filter((provider) => provider.accessible === true).length;
+  const count = providers.length ? `${configured} / ${providers.length}` : "— / —";
   $("#creditTriggerCount").textContent = count;
   $("#creditKeyCount").textContent = count;
-
-  const providerName = state.providerConfig?.name || $("#providerName").value.trim();
-  $("#creditPopupNote").textContent = providerName
-    ? `${providerName} is not connected to a quota endpoint. Per-key usage and limits cannot be fetched yet; no request is being made.`
-    : "Provider quota data is unavailable until a provider-specific usage adapter is connected. No quota request is being made.";
+  $("#creditUsed").textContent = providers.length ? String(accessible) : "—";
+  $("#creditLimit").textContent = providers.length ? String(providers.length) : "—";
+  $("#creditPopupNote").textContent = providers.length
+    ? "Provider quota data is not exposed by these providers, so usage limits cannot be shown. The counts below reflect credentials saved on this server and whether the last access test reached each provider; no quota request is made."
+    : "Provider status is unavailable until the server reports it. No quota request is being made.";
 
   const rows = $("#creditKeyRows");
   rows.replaceChildren();
-  if (!activeKeys.length) {
+  if (!providers.length) {
     const empty = document.createElement("p");
     empty.className = "credit-key-empty";
-    empty.textContent = "No API keys entered in this tab session.";
+    empty.textContent = "No provider status loaded yet.";
     rows.append(empty);
     return;
   }
-
-  activeKeys.forEach(({ value, index }) => {
+  Object.entries(payload.providers).forEach(([key, provider]) => {
     const row = document.createElement("div");
     row.className = "credit-key-row";
     const identity = document.createElement("div");
     identity.className = "credit-key-identity";
     const name = document.createElement("span");
     name.className = "credit-key-name";
-    name.textContent = `API KEY ${String(index + 1).padStart(2, "0")}`;
+    name.textContent = provider.label || key;
     const mask = document.createElement("span");
     mask.className = "credit-key-mask";
-    mask.textContent = value.length > 4 ? `•••• ${value.slice(-4)}` : "••••••••";
+    mask.textContent = provider.configured ? provider.masked || "saved" : "not saved";
     identity.append(name, mask);
     const quota = document.createElement("span");
     quota.className = "credit-key-quota";
-    quota.textContent = "— USED · — LIMIT";
-    row.setAttribute("aria-label", `API key ${index + 1}; credit usage and limit unavailable`);
+    quota.textContent = providerStateText(provider);
+    row.title = provider.message || "";
+    row.setAttribute("aria-label", `${name.textContent}: ${providerStateText(provider)}`);
     row.append(identity, quota);
     rows.append(row);
   });
@@ -916,101 +945,210 @@ function setCreditPopupOpen(open) {
   trigger.setAttribute("aria-expanded", String(open));
 }
 
-function renderProviderKeySlots() {
-  const container = $("#keySlots");
-  if (!container) return;
-  container.replaceChildren();
-  state.providerKeys.forEach((value, index) => {
-    const row = document.createElement("div");
-    row.className = "key-slot-row";
-
-    const label = document.createElement("label");
-    label.className = "key-slot-label";
-    label.htmlFor = `provider-key-${index}`;
-    label.textContent = `KEY ${String(index + 1).padStart(2, "0")}`;
-
-    const controls = document.createElement("div");
-    controls.className = "key-slot-controls";
-    const input = document.createElement("input");
-    input.className = "provider-input key-input";
-    input.id = `provider-key-${index}`;
-    input.type = "password";
-    input.value = value;
-    input.placeholder = `Paste API key ${index + 1}`;
-    input.autocomplete = "new-password";
-    input.autocapitalize = "off";
-    input.spellcheck = false;
-    input.dataset.keyIndex = String(index);
-    input.setAttribute("aria-label", `API key ${index + 1} of 20`);
-
-    const toggle = document.createElement("button");
-    toggle.type = "button";
-    toggle.className = "key-visibility-button";
-    toggle.dataset.toggleKey = String(index);
-    toggle.textContent = "SHOW";
-    toggle.setAttribute("aria-label", `Show API key ${index + 1}`);
-
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.className = "key-remove-button";
-    remove.dataset.removeKey = String(index);
-    remove.textContent = "×";
-    remove.setAttribute("aria-label", `Remove API key ${index + 1}`);
-
-    controls.append(input, toggle, remove);
-    row.append(label, controls);
-    container.append(row);
-  });
-  updateProviderKeyCount();
+function renderTelegramFeedState() {
+  const strong = $("#telegramFeedState");
+  const small = $("#telegramFeedMessage");
+  if (!strong || !small) return;
+  const provider = state.providers?.providers?.telegram;
+  if (!provider) {
+    strong.textContent = "STATUS UNKNOWN";
+    small.textContent = "The server has not reported provider status yet.";
+    return;
+  }
+  strong.textContent = providerStateText(provider);
+  small.textContent = provider.configured
+    ? provider.message
+    : "Save a bot token and channel id to enable posting.";
 }
 
-function updateProviderConnectionStatus() {
-  const activeKeys = state.providerKeys.filter((key) => key.trim()).length;
-  const hasNotes = Boolean($("#providerName").value.trim() || $("#providerApiUrl").value.trim() || activeKeys);
-  let formMessage = "These browser-only notes are not sent to the server and do not configure a live feed.";
-  if (state.providerConfig) {
-    formMessage = `${state.providerConfig.name} saved as local reference notes only. They are not tested, transmitted, or used by Orbix’s built-in integrations.`;
-  } else if (hasNotes) {
-    formMessage = `${activeKeys} key note${activeKeys === 1 ? "" : "s"} entered in this tab. These values cannot connect a provider; use server environment variables instead.`;
+function renderProviderStatus(summary = "") {
+  const payload = state.providers;
+  if (!payload) return;
+  const fields = payload.fields || {};
+  const providers = payload.providers || {};
+
+  PROVIDER_CARDS.forEach((card) => {
+    const provider = providers[card.provider];
+    const stateNode = $(card.state);
+    const noteNode = $(card.note);
+    if (stateNode) {
+      const text = providerStateText(provider);
+      stateNode.textContent = text;
+      stateNode.classList.toggle("is-accessible", text === "ACCESSIBLE");
+      stateNode.classList.toggle("is-blocked", text === "NOT ACCESSIBLE");
+    }
+    card.inputs.forEach((input) => {
+      const node = $(input.selector);
+      if (!node) return;
+      const field = fields[input.field];
+      if (field?.source === "environment") {
+        node.value = "";
+        node.disabled = true;
+        node.placeholder = "Provided by the server environment";
+      } else {
+        node.disabled = false;
+        node.placeholder = field?.configured
+          ? `Saved ${field.masked} — leave blank to keep`
+          : input.placeholder;
+      }
+    });
+    if (noteNode) {
+      if (!provider) {
+        noteNode.textContent = card.fallback;
+      } else {
+        const source = provider.source === "environment" ? "server environment" : provider.source === "web" ? "saved on this server" : "not saved";
+        const checked = provider.checked_at ? ` · last test ${compactTime(provider.checked_at)}` : "";
+        noteNode.textContent = `${provider.message}${provider.masked ? ` · ${provider.masked}` : ""} · ${source}${checked}`;
+      }
+    }
+  });
+
+  const configured = Object.values(providers).filter((provider) => provider.configured).length;
+  const accessible = Object.values(providers).filter((provider) => provider.accessible === true).length;
+  const tag = $("#providerPanelTag");
+  if (tag) {
+    tag.textContent = accessible === 3 ? "ALL ACCESSIBLE" : configured ? `${configured} / 3 SAVED` : "NOT CONNECTED";
+    tag.classList.toggle("is-configured", accessible === 3);
+    tag.classList.toggle("is-pending", configured > 0 && accessible < 3);
   }
-  $("#providerFormStatus").textContent = formMessage;
+  const statusNode = $("#providerFormStatus");
+  if (statusNode) {
+    const base = payload.stored
+      ? `${configured} of 3 providers are configured; ${accessible} passed the last access test. Keys marked “server environment” are managed outside this page.`
+      : "No credentials saved on this server yet. Server environment variables, when present, take precedence.";
+    statusNode.textContent = summary || base;
+  }
+  renderTelegramFeedState();
   renderCreditDashboard();
 }
 
-function saveProviderConfiguration() {
-  const name = $("#providerName").value.trim();
-  const rawUrl = $("#providerApiUrl").value.trim();
-  const keys = state.providerKeys.map((key) => key.trim()).filter(Boolean);
-  if (!name || !rawUrl || keys.length === 0) {
-    state.providerConfig = null;
-    updateProviderConnectionStatus();
-    $("#providerFormStatus").textContent = "Enter a provider name, an HTTPS/HTTP base URL, and at least one API key before keeping this session configuration.";
-    return;
-  }
-  let baseUrl;
+async function loadProviders() {
+  if (state.providersBusy) return;
+  state.providersBusy = true;
   try {
-    const parsed = new URL(rawUrl);
-    if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("unsupported protocol");
-    baseUrl = parsed.toString();
-  } catch (_) {
-    state.providerConfig = null;
-    updateProviderConnectionStatus();
-    $("#providerFormStatus").textContent = "Enter a valid HTTP or HTTPS API base URL. No request has been made.";
-    $("#providerApiUrl").focus();
-    return;
+    const payload = await api("/api/providers");
+    state.providers = payload;
+    renderProviderStatus();
+  } catch (error) {
+    const statusNode = $("#providerFormStatus");
+    if (statusNode) statusNode.textContent = `Provider status unavailable: ${error.message}`;
+  } finally {
+    state.providersBusy = false;
   }
-  state.providerConfig = { name, baseUrl, keyCount: keys.length };
-  updateProviderConnectionStatus();
 }
 
-function clearProviderConfiguration() {
-  state.providerConfig = null;
-  state.providerKeys = [""];
-  $("#providerName").value = "";
-  $("#providerApiUrl").value = "";
-  renderProviderKeySlots();
-  updateProviderConnectionStatus();
-  $("#providerName").focus();
+function providerFormValues() {
+  const values = {};
+  PROVIDER_CARDS.forEach((card) => {
+    card.inputs.forEach((input) => {
+      const node = $(input.selector);
+      if (!node || node.disabled) return;
+      const value = node.value.trim();
+      if (value) values[input.field] = value;
+    });
+  });
+  return values;
+}
+
+function setProviderButtonsBusy(busy, action) {
+  const save = $("#saveProviderButton");
+  const test = $("#testProviderButton");
+  const clear = $("#clearProviderButton");
+  if (save) {
+    save.disabled = busy;
+    save.innerHTML = busy && action === "save" ? "SAVING…" : 'SAVE &amp; APPLY <span class="button-arrow">↗</span>';
+  }
+  if (test) {
+    test.disabled = busy;
+    test.innerHTML = busy && action === "test"
+      ? "<span>TESTING…</span><span class=\"button-arrow\">↻</span>"
+      : '<span>TEST ACCESS</span><span class="button-arrow">↻</span>';
+  }
+  if (clear) clear.disabled = busy;
+}
+
+async function saveProviderConfiguration() {
+  const values = providerFormValues();
+  if (!Object.keys(values).length) {
+    $("#providerFormStatus").textContent = "Enter at least one credential. Fields left blank keep their saved value.";
+    return;
+  }
+  setProviderButtonsBusy(true, "save");
+  $("#providerFormStatus").textContent = "Saving credentials on the server…";
+  try {
+    const payload = await api("/api/providers", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(values),
+    });
+    state.providers = payload;
+    Object.keys(values).forEach((field) => {
+      const card = PROVIDER_CARDS.find((item) => item.inputs.some((input) => input.field === field));
+      card?.inputs.filter((input) => input.field === field).forEach((input) => { $(input.selector).value = ""; });
+    });
+    renderProviderStatus("Credentials saved and applied. Checking provider access…");
+    void refreshAutomationStatus();
+    setProviderButtonsBusy(false);
+    await testProviderConfiguration(true);
+  } catch (error) {
+    $("#providerFormStatus").textContent = `Save failed: ${error.message}`;
+  } finally {
+    setProviderButtonsBusy(false);
+  }
+}
+
+async function testProviderConfiguration(auto = false) {
+  setProviderButtonsBusy(true, "test");
+  $("#providerFormStatus").textContent = "Testing each configured provider. No messages are posted and no candles are stored; each test may use one provider request…";
+  try {
+    const payload = await api("/api/providers/test", { method: "POST" });
+    state.providers = payload;
+    const accessible = Object.values(payload.providers || {}).filter((provider) => provider.accessible === true).length;
+    const configured = Object.values(payload.providers || {}).filter((provider) => provider.configured).length;
+    renderProviderStatus(`${auto ? "Credentials saved. " : ""}Access test finished: ${accessible} of ${configured} configured provider${configured === 1 ? "" : "s"} reachable.`);
+  } catch (error) {
+    $("#providerFormStatus").textContent = `Access test failed: ${error.message}`;
+  } finally {
+    setProviderButtonsBusy(false);
+  }
+}
+
+function armProviderClear() {
+  const button = $("#clearProviderButton");
+  if (state.providerClearArmed) {
+    window.clearTimeout(state.providerClearTimer);
+    state.providerClearArmed = false;
+    return true;
+  }
+  state.providerClearArmed = true;
+  button.textContent = "CLICK AGAIN TO CLEAR";
+  $("#providerFormStatus").textContent = "This removes keys saved from this page; server environment keys are kept. Click again within 5 seconds to confirm.";
+  state.providerClearTimer = window.setTimeout(() => {
+    state.providerClearArmed = false;
+    button.textContent = "CLEAR SAVED KEYS";
+    void loadProviders();
+  }, 5000);
+  return false;
+}
+
+async function clearProviderConfiguration() {
+  if (!armProviderClear()) return;
+  const button = $("#clearProviderButton");
+  button.disabled = true;
+  $("#providerFormStatus").textContent = "Removing saved keys…";
+  try {
+    const payload = await api("/api/providers", { method: "DELETE" });
+    state.providerClearArmed = false;
+    state.providers = payload;
+    PROVIDER_CARDS.forEach((card) => card.inputs.forEach((input) => { const node = $(input.selector); if (node) node.value = ""; }));
+    renderProviderStatus("Saved keys removed. Keys supplied by the server environment are unchanged.");
+    void refreshAutomationStatus();
+  } catch (error) {
+    $("#providerFormStatus").textContent = `Clear failed: ${error.message}`;
+  } finally {
+    button.disabled = false;
+    button.textContent = "CLEAR SAVED KEYS";
+  }
 }
 
 function utcClock(value, includeDate = false) {
@@ -1184,6 +1322,7 @@ function setActivePage(route, shouldScroll = true) {
   if (route === "future") void loadFuturePlan();
   if (route === "telegram") void refreshTelegramPage();
   if (route === "trader") void loadTraderPage();
+  if (route === "connections") void loadProviders();
   if (route === "engine") void loadModelCard();
 }
 
@@ -2130,17 +2269,8 @@ function wireEvents() {
     const button = event.target.closest("[data-activate-dataset]");
     if (button && !button.disabled) activateArchivedDataset(button.dataset.activateDataset, button);
   });
-  $("#addKeyButton").addEventListener("click", () => {
-    if (state.providerKeys.length >= 20) return;
-    state.providerKeys.push("");
-    state.providerConfig = null;
-    renderProviderKeySlots();
-    updateProviderConnectionStatus();
-    document.getElementById(`provider-key-${state.providerKeys.length - 1}`)?.focus();
-  });
-  $("#providerName").addEventListener("input", () => { state.providerConfig = null; updateProviderConnectionStatus(); });
-  $("#providerApiUrl").addEventListener("input", () => { state.providerConfig = null; updateProviderConnectionStatus(); });
   $("#saveProviderButton").addEventListener("click", saveProviderConfiguration);
+  $("#testProviderButton").addEventListener("click", () => testProviderConfiguration());
   $("#clearProviderButton").addEventListener("click", clearProviderConfiguration);
   $("#creditDashboardTrigger").addEventListener("click", () => {
     setCreditPopupOpen($("#creditDashboardPopup").hidden);
@@ -2157,30 +2287,6 @@ function wireEvents() {
       setCreditPopupOpen(false);
       $("#creditDashboardTrigger").focus();
     }
-  });
-  $("#keySlots").addEventListener("input", (event) => {
-    const input = event.target.closest("[data-key-index]");
-    if (!input) return;
-    state.providerKeys[Number(input.dataset.keyIndex)] = input.value;
-    state.providerConfig = null;
-    updateProviderKeyCount();
-    updateProviderConnectionStatus();
-  });
-  $("#keySlots").addEventListener("click", (event) => {
-    const toggle = event.target.closest("[data-toggle-key]");
-    if (toggle) {
-      const input = $(`#provider-key-${toggle.dataset.toggleKey}`);
-      input.type = input.type === "password" ? "text" : "password";
-      toggle.textContent = input.type === "password" ? "SHOW" : "HIDE";
-      toggle.setAttribute("aria-label", `${input.type === "password" ? "Show" : "Hide"} API key ${Number(toggle.dataset.toggleKey) + 1}`);
-      return;
-    }
-    const remove = event.target.closest("[data-remove-key]");
-    if (!remove) return;
-    state.providerKeys.splice(Number(remove.dataset.removeKey), 1);
-    state.providerConfig = null;
-    renderProviderKeySlots();
-    updateProviderConnectionStatus();
   });
   $("#historyRows").addEventListener("click", (event) => {
     const button = event.target.closest("[data-resolve-id]");
@@ -2214,8 +2320,6 @@ function wireEvents() {
 
 async function start() {
   wireEvents();
-  renderProviderKeySlots();
-  updateProviderConnectionStatus();
   updateNotificationButton();
   initializeBlackholeAnimation();
   let route = window.location.hash.slice(1);
@@ -2224,11 +2328,12 @@ async function start() {
     window.history.replaceState(null, "", "#dashboard");
   }
   setActivePage(route, false);
-  await Promise.all([loadStrategies(), loadMarket(), refreshHistory(), refreshStorageSummary(), refreshAutomationStatus()]);
+  await Promise.all([loadStrategies(), loadMarket(), refreshHistory(), refreshStorageSummary(), refreshAutomationStatus(), loadProviders()]);
   scheduleAutomaticBacktest();
   window.setInterval(() => { void refreshAutomationStatus(); }, 10000);
   window.setInterval(renderClock, 1000);
   window.setInterval(() => { if (state.route === "trader") void loadTraderPage(); }, 30000);
+  window.setInterval(() => { if (state.route === "connections") void loadProviders(); }, 30000);
   if (state.route === "dashboard") startBlackholeAnimation();
 }
 

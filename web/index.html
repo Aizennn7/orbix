@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#050505">
   <title>Dashboard — Orbix Signal Lab</title>
-  <link rel="stylesheet" href="/static/styles.css?v=22">
+  <link rel="stylesheet" href="/static/styles.css?v=23">
 </head>
 <body>
   <div class="noise" aria-hidden="true"></div>
@@ -43,18 +43,18 @@
     <span class="connection-indicator" id="connectionIndicator" aria-hidden="true"></span>
     <div class="connection-summary"><span class="connection-kicker">DATA PROVIDER</span><strong id="connectionStatus" role="status" aria-live="polite">NOT CONNECTED</strong><span id="connectionDetail">No provider configured · synthetic demo active</span></div>
     <div class="credit-dashboard" id="creditDashboard">
-      <button class="credit-trigger" id="creditDashboardTrigger" type="button" aria-controls="creditDashboardPopup" aria-expanded="false" aria-label="Show API credit usage, limits, and configured keys">
-        <span class="credit-trigger-label">API CREDITS</span><strong id="creditTriggerCount">0 / 20</strong><span class="credit-chevron" aria-hidden="true">⌄</span>
+      <button class="credit-trigger" id="creditDashboardTrigger" type="button" aria-controls="creditDashboardPopup" aria-expanded="false" aria-label="Show configured providers and their access status">
+        <span class="credit-trigger-label">API KEYS</span><strong id="creditTriggerCount">— / —</strong><span class="credit-chevron" aria-hidden="true">⌄</span>
       </button>
       <section class="credit-popup" id="creditDashboardPopup" aria-labelledby="creditPopupTitle" role="dialog" aria-modal="false" hidden>
         <header class="credit-popup-header">
-          <div><div class="eyebrow small-eyebrow">KEY QUOTA OVERVIEW</div><h2 id="creditPopupTitle">API credit usage</h2></div>
+          <div><div class="eyebrow small-eyebrow">PROVIDER ACCESS</div><h2 id="creditPopupTitle">API key status</h2></div>
           <button class="credit-popup-close" id="creditPopupClose" type="button" aria-label="Close API credits popup">×</button>
         </header>
         <div class="credit-metrics">
-          <div class="credit-metric"><span>KEYS</span><strong id="creditKeyCount">0 / 20</strong></div>
-          <div class="credit-metric"><span>CREDITS USED</span><strong id="creditUsed">—</strong></div>
-          <div class="credit-metric"><span>LIMIT</span><strong id="creditLimit">—</strong></div>
+          <div class="credit-metric"><span>CONFIGURED</span><strong id="creditKeyCount">— / —</strong></div>
+          <div class="credit-metric"><span>ACCESSIBLE</span><strong id="creditUsed">—</strong></div>
+          <div class="credit-metric"><span>TOTAL</span><strong id="creditLimit">—</strong></div>
         </div>
         <p class="credit-popup-note" id="creditPopupNote">Provider quota data is unavailable until a provider-specific usage adapter is connected. No quota request is being made.</p>
         <div class="credit-key-list" id="creditKeyRows" aria-live="polite"></div>
@@ -351,7 +351,7 @@
             <p id="learningNote">Imported-data outcomes update the model only after a confirmed expiry price or matching completed candle arrives. Demo data never trains it.</p>
             <small>Append completed M1 bars through <code>POST /api/candles/append</code> to auto-resolve matching expired paper signals.</small>
           </div>
-          <div class="guide-warning"><strong>Automatic feed is optional</strong><span>Configure the server-side Twelve Data key in <code>.env</code>. Orbix refreshes completed M1 bars every 60 seconds and event data every 15 minutes; it will not overwrite an active manual CSV unless you explicitly sync the provider.</span></div>
+          <div class="guide-warning"><strong>Automatic feed is optional</strong><span>Save the Twelve Data key in the Connections page. Orbix refreshes completed M1 bars every 60 seconds and event data every 15 minutes; it will not overwrite an active manual CSV unless you explicitly sync the provider.</span></div>
           <a class="text-button inline-link" href="#dashboard" data-route="dashboard">SELECT PAIR ON DASHBOARD ↗</a>
         </aside>
       </div>
@@ -359,32 +359,49 @@
 
     <section class="page-view" id="page-connections" data-page="connections" aria-labelledby="connections-title" hidden>
       <header class="page-heading">
-        <div><div class="eyebrow"><span class="eyebrow-line"></span> PROVIDER SETUP</div><h1 id="connections-title">Data connections</h1><p>Live adapters run server-side. Configure credentials in the server environment; the browser never receives provider secrets.</p></div>
+        <div><div class="eyebrow"><span class="eyebrow-line"></span> PROVIDER SETUP</div><h1 id="connections-title">Data connections</h1><p>Save provider credentials here. Orbix stores them on this server, applies them to the running service without a restart, and shows whether each provider accepts them.</p></div>
         <div class="blackhole-mini" aria-hidden="true"><i class="mini-ring ring-one"></i><i class="mini-ring ring-two"></i><b></b></div>
       </header>
       <div class="connection-layout">
         <article class="panel provider-form-panel">
-          <div class="panel-heading"><div><div class="eyebrow small-eyebrow">LOCAL REFERENCE ONLY</div><h2>Provider notes</h2></div><span class="mode-tag">NOT CONNECTED</span></div>
-          <p class="panel-intro">These browser-only fields are not used by Orbix’s built-in integrations. Use the server environment variables below to connect Twelve Data and Finnhub; never paste production secrets into this page.</p>
-          <div class="env-guide">
-            <span class="field-label">PROJECT-ROOT .ENV · LOADED ON SERVER START</span>
+          <div class="panel-heading"><div><div class="eyebrow small-eyebrow">SERVER-SAVED CREDENTIALS</div><h2>Connect providers</h2></div><span class="mode-tag" id="providerPanelTag">NOT CONNECTED</span></div>
+          <p class="panel-intro">Enter each credential once. It is written to a server-local file readable only by the server user (mode 600, unencrypted at rest), applied to the live service immediately, and read back only as a mask. The full value never returns to this page.</p>
+          <div class="provider-credential-list">
+            <div class="provider-credential" data-provider="market">
+              <div class="provider-credential-head"><span>MARKET DATA · TWELVE DATA</span><strong id="marketCredentialState">NOT CONNECTED</strong></div>
+              <label class="field-label" for="twelveDataKey">API KEY</label>
+              <input class="provider-input" id="twelveDataKey" type="password" placeholder="Paste the Twelve Data API key" autocomplete="new-password" autocapitalize="off" spellcheck="false">
+              <small id="marketCredentialNote">Used for completed M1 candles. Without it the live feed stays off; imported CSV data still works.</small>
+            </div>
+            <div class="provider-credential" data-provider="calendar">
+              <div class="provider-credential-head"><span>ECONOMIC CALENDAR · FINNHUB</span><strong id="calendarCredentialState">NOT CONNECTED</strong></div>
+              <label class="field-label" for="finnhubKey">API KEY</label>
+              <input class="provider-input" id="finnhubKey" type="password" placeholder="Paste the Finnhub API key" autocomplete="new-password" autocapitalize="off" spellcheck="false">
+              <small id="calendarCredentialNote">Used to pause signals around high-impact events. Calendar access may require a paid Finnhub plan.</small>
+            </div>
+            <div class="provider-credential" data-provider="telegram">
+              <div class="provider-credential-head"><span>TELEGRAM PUBLISHING</span><strong id="telegramCredentialState">NOT CONNECTED</strong></div>
+              <label class="field-label" for="telegramBotToken">BOT TOKEN</label>
+              <input class="provider-input" id="telegramBotToken" type="password" placeholder="Paste the bot token from BotFather" autocomplete="new-password" autocapitalize="off" spellcheck="false">
+              <label class="field-label" for="telegramChatId">TARGET CHANNEL / CHAT ID</label>
+              <input class="provider-input" id="telegramChatId" type="text" placeholder="e.g. -1001234567890" autocomplete="off" spellcheck="false">
+              <small id="telegramCredentialNote">The bot must be an administrator of the channel with permission to post messages.</small>
+            </div>
+          </div>
+          <div class="provider-actions">
+            <button class="button button-primary" id="saveProviderButton" type="button">SAVE &amp; APPLY <span class="button-arrow">↗</span></button>
+            <button class="button button-secondary" id="testProviderButton" type="button"><span>TEST ACCESS</span><span class="button-arrow">↻</span></button>
+            <button class="text-button" id="clearProviderButton" type="button">CLEAR SAVED KEYS</button>
+          </div>
+          <p class="micro-copy" id="providerFormStatus" role="status">No credentials saved on this server yet. Server environment variables, when present, take precedence.</p>
+          <details class="env-guide">
+            <summary class="field-label">SERVER ENVIRONMENT FALLBACK</summary>
             <pre class="env-snippet">ORBIX_TWELVE_DATA_API_KEY=your_key
 ORBIX_FINNHUB_API_KEY=your_key
 ORBIX_TELEGRAM_BOT_TOKEN=your_bot_token
 ORBIX_TELEGRAM_CHAT_ID=-100...</pre>
-            <p class="micro-copy">Save the file as <code>.env</code> beside <code>pyproject.toml</code>, then restart Orbix. Exported shell or Docker variables win; <code>ORBIX_ENV_FILE</code> selects a different file. The file is ignored by Git — never commit or share it.</p>
-          </div>
-          <label class="field-label" for="providerName">Provider note</label>
-          <input class="provider-input" id="providerName" type="text" placeholder="e.g. Your FX data provider" autocomplete="off" maxlength="80">
-          <label class="field-label" for="providerApiUrl">Endpoint note · not called</label>
-          <input class="provider-input" id="providerApiUrl" type="url" placeholder="https://api.provider.example/v1" autocomplete="url" spellcheck="false">
-          <div class="key-list-heading"><div><span class="field-label">Local key notes · never submitted</span><span class="key-count" id="providerKeyCount">0 / 20 active</span></div><button class="button button-secondary add-key-button" id="addKeyButton" type="button">ADD KEY <span>＋</span></button></div>
-          <div class="key-slots" id="keySlots" aria-label="API key inputs"></div>
-          <div class="provider-actions">
-            <button class="button button-primary" id="saveProviderButton" type="button">SAVE LOCAL NOTES <span class="button-arrow">↗</span></button>
-            <button class="text-button" id="clearProviderButton" type="button">CLEAR CONFIG</button>
-          </div>
-          <p class="micro-copy" id="providerFormStatus" role="status">Local notes stay in this tab only. They never connect to a provider or Orbix’s server.</p>
+            <p class="micro-copy">A root <code>.env</code> beside <code>pyproject.toml</code> is loaded at server start; exported shell or Docker variables win, and <code>ORBIX_ENV_FILE</code> selects another file. Environment keys cannot be replaced from this page. The file is ignored by Git — never commit or share it.</p>
+          </details>
         </article>
         <aside class="panel provider-status-panel">
           <div class="eyebrow small-eyebrow">SERVER-SIDE AUTOMATION</div>
@@ -393,6 +410,7 @@ ORBIX_TELEGRAM_CHAT_ID=-100...</pre>
           <div class="server-provider-list">
             <div><span>MARKET DATA · TWELVE DATA</span><strong id="marketFeedState">NOT CONFIGURED</strong><small id="marketFeedMessage">Set ORBIX_TWELVE_DATA_API_KEY.</small></div>
             <div><span>ECONOMIC CALENDAR · FINNHUB</span><strong id="calendarFeedState">NOT CONFIGURED</strong><small id="calendarFeedMessage">Set ORBIX_FINNHUB_API_KEY; calendar access may require a paid plan.</small></div>
+            <div><span>TELEGRAM · SIGNAL PUBLISHING</span><strong id="telegramFeedState">NOT CONFIGURED</strong><small id="telegramFeedMessage">Save a bot token and channel id to enable posting.</small></div>
           </div>
           <div class="server-provider-actions">
             <button class="button button-primary" id="syncLiveFeedButton" type="button">SYNC / ACTIVATE LIVE FEED <span class="button-arrow">↗</span></button>
@@ -612,6 +630,6 @@ ORBIX_TELEGRAM_CHAT_ID=-100...</pre>
     <p>Signal research only. Live feeds are optional/configured on the server. No Quotex login or real trades.</p>
     <span class="footer-right">BUILT FOR BETTER QUESTIONS</span>
   </footer>
-  <script src="/static/app.js?v=22" defer></script>
+  <script src="/static/app.js?v=23" defer></script>
 </body>
 </html>

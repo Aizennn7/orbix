@@ -16,13 +16,14 @@ Orbix is a signal-research and paper-testing dashboard for completed one-minute 
 
 Built-in server-side adapters use [Twelve Data's time-series endpoint](https://twelvedata.com/docs/market-data/time-series) for UTC one-minute OHLCV CSV and [Finnhub's economic calendar](https://finnhub.io/docs/api/economic-calendar). Provider plans, quotas, symbols, and access rights vary. Finnhub labels its economic-calendar endpoint as premium in its documentation; a working API key/plan is required. Orbix makes no provider request until a server key is configured.
 
-1. Copy `.env.example` to `.env` in the project root and add your own Twelve Data and Finnhub keys. The server loads this file on startup; existing shell/Docker variables take precedence. Do not paste keys into the browser-only notes form, commit `.env`, or share secrets in chat. Set `ORBIX_ENV_FILE=/path/to/file` to use a different file.
-2. Install requirements and start one Uvicorn worker with `uvicorn orbix.api:app --host 0.0.0.0 --port 8000`. `--env-file .env` is optional now that the root file is loaded automatically.
-3. The server polls closed M1 bars every 60 seconds (configurable, minimum 60) and the calendar every 15 minutes (configurable). It filters out incomplete candles, imports a provider dataset on first sync, and appends only new bars to that provider dataset. If a manual CSV is active, background sync will not overwrite it; click **Sync / Activate Live Feed** to intentionally switch.
-4. Auto-signals run only when the provider dataset is active, the candle is fresh, and a recent event calendar is available with no active blackout. One evaluation is made per newly closed bar. On a provider or calendar error, automation pauses and reports the cause.
-5. Browser notifications require clicking **Enable Alerts**, granting browser permission, and keeping the dashboard open. The in-app signal feed continues while the page is open; no web-push service is configured for a closed browser/device.
+1. Install requirements and start one Uvicorn worker with `uvicorn orbix.api:app --host 0.0.0.0 --port 8000`.
+2. Open **Data connections** in the dashboard and enter the Twelve Data, Finnhub, and optional Telegram credentials. **SAVE & APPLY** writes them to `provider_settings.json` in the active data directory (mode 600, ignored by Git, unencrypted at rest), applies them to the running service without a restart, and **TEST ACCESS** checks provider read access and bot/channel posting rights without posting a message or storing candles. Each test makes one lightweight provider request per configured provider. The page only ever receives masks of the saved keys; the full values never return to the browser. Server environment variables take precedence and cannot be replaced from the page.
+3. For a headless or container deployment, copy `.env.example` to `.env` in the project root instead and add the keys there. The server loads this file on startup; existing shell/Docker variables take precedence. `--env-file .env` is optional, and `ORBIX_ENV_FILE=/path/to/file` selects a different file. Never commit `.env` or share secrets in chat.
+4. The server polls closed M1 bars every 60 seconds (configurable, minimum 60) and the calendar every 15 minutes (configurable). It filters out incomplete candles, imports a provider dataset on first sync, and appends only new bars to that provider dataset. If a manual CSV is active, background sync will not overwrite it; click **Sync / Activate Live Feed** to intentionally switch.
+5. Auto-signals run only when the provider dataset is active, the candle is fresh, and a recent event calendar is available with no active blackout. One evaluation is made per newly closed bar. On a provider or calendar error, automation pauses and reports the cause.
+6. Browser notifications require clicking **Enable Alerts**, granting browser permission, and keeping the dashboard open. The in-app signal feed continues while the page is open; no web-push service is configured for a closed browser/device.
 
-Environment settings are in `.env.example`: pair, polling intervals, event-time timezone, pre/post news-blackout windows, maximum candle age, maximum late-entry delay, auto strategy, and whether automated signals are enabled. Finnhub event times without an explicit timezone use `ORBIX_FINNHUB_TIMEZONE`; verify that setting against the provider's account/feed. Credentials stay server-side. The manual **Return to demo data** action pauses the provider loop until you explicitly sync it again.
+Environment settings are in `.env.example`: pair, polling intervals, event-time timezone, pre/post news-blackout windows, maximum candle age, maximum late-entry delay, auto strategy, and whether automated signals are enabled. Finnhub event times without an explicit timezone use `ORBIX_FINNHUB_TIMEZONE`; verify that setting against the provider's account/feed. Credentials stay server-side. Precedence is server environment, then keys saved from the Connections page, then unconfigured. The manual **Return to demo data** action pauses the provider loop until you explicitly sync it again.
 
 ## Run it without live credentials
 
@@ -122,12 +123,13 @@ python -m unittest discover -s tests -v
 Useful endpoints:
 
 - `GET /api/health`, `/api/storage`, `/api/learning`, `/api/automation/status`
+- `GET /api/providers` (masked status), `POST /api/providers`, `DELETE /api/providers`, `POST /api/providers/test`
 - `GET /api/model?pair=EUR/USD` (calibration, drift, contributions, versions, shadow and dataset-learning counters, per-strategy record)
 - `POST /api/model/retrain`, `/api/model/rollback`, `/api/model/maintenance`
 - `GET /api/preflight` (provider, calendar, model, calibration and delivery readiness)
 - `GET /api/market?pair=EUR/USD`, `/api/strategies`, `/api/signals`
 - `POST /api/automation/sync` and `/api/automation/calendar/refresh`
-- `POST /api/signal` and `/api/backtest`
+- `POST /api/signal`, `/api/signals/scan` (all executable strategies on one closed candle), and `/api/backtest`
 - `POST /api/import?pair=EUR/USD`, `/api/candles/append?pair=EUR/USD`, `/api/feedback`
 - `POST /api/reset-demo?pair=EUR/USD`
 - `GET /api/telegram/status`, `GET /api/future/plan?count=6`, `GET /api/abstentions?days=7`

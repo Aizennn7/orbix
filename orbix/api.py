@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor, wait
 from contextlib import asynccontextmanager
 from pathlib import Path
 import tempfile
@@ -18,6 +19,7 @@ from .brokers import pocket_option_ticket
 from .domain import parse_datetime
 from .env import load_env
 from .future import build_future_plan
+from .provider_config import ProviderConfigStore
 from .runtime import BACKTEST_WINDOW, Runtime
 from .strategies import strategy_catalog_payload
 from .telegram import TelegramError
@@ -36,6 +38,8 @@ ENV_FILE = load_env()
 # does not open the live data store or fight a running preview for the lock.
 runtime = Runtime()
 automation = AutomationService(runtime)
+provider_config = ProviderConfigStore(runtime.data_dir)
+automation.apply_provider_config(provider_config.effective())
 
 
 @asynccontextmanager
@@ -91,6 +95,13 @@ class TelegramSendRequest(BaseModel):
 
 class TelegramAutoRequest(BaseModel):
     enabled: bool
+
+
+class ProviderConfigRequest(BaseModel):
+    twelve_data_api_key: str | None = Field(default=None, max_length=512)
+    finnhub_api_key: str | None = Field(default=None, max_length=512)
+    telegram_bot_token: str | None = Field(default=None, max_length=512)
+    telegram_chat_id: str | None = Field(default=None, max_length=512)
 
 
 def _telegram_http_error(exc: TelegramError) -> HTTPException:
@@ -211,6 +222,75 @@ def model_maintenance() -> dict:
 @app.get("/api/automation/status")
 def automation_status() -> dict:
     return automation.status()
+
+
+def _providers_payload() -> dict:
+    payload = provider_config.status()
+    automation_state = automation.status()
+    calendar_state = automation.calendar.status()
+    telegram_state = automation.telegram.status()
+    payload["providers"]["market"]["live"] = bool(automation_state["market"]["connected"])
+    payload["providers"]["calendar"]["live"] = bool(calendar_state["connected"])
+    payload["providers"]["calendar"]["detail"] = {
+        "last_updated": calendar_state["last_updated"],
+        "last_error": calendar_state["last_error"],
+        "event_count": calendar_state["event_count"],
+    }
+    auto_post = bool(automation_state["telegram"].get("auto_post_enabled", False))
+    payload["providers"]["telegram"]["live"] = bool(telegram_state["configured"] and auto_post)
+    payload["providers"]["telegram"]["target_chat"] = telegram_state["target_chat"]
+    payload["providers"]["telegram"]["auto_post"] = auto_post
+    return payload
+
+
+@app.get("/api/providers")
+def provider_status() -> dict:
+    return _providers_payload()
+
+
+@app.post("/api/providers")
+def save_provider_config(payload: ProviderConfigRequest) -> dict:
+    try:
+        provider_config.update(payload.model_dump(exclude_none=True))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    automation.apply_provider_config(provider_config.effective())
+    return _providers_payload()
+
+
+@app.delete("/api/providers")
+def clear_provider_config() -> dict:
+    provider_config.clear()
+    automation.apply_provider_config(provider_config.effective())
+    return _providers_payload()
+
+
+@app.post("/api/providers/test")
+def test_provider_config() -> dict:
+    results: dict[str, dict] = {}
+    checks = {
+        "market": automation.market_provider.probe,
+        "calendar": automation.calendar.probe,
+        "telegram": automation.telegram.probe,
+    }
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        futures = {name: pool.submit(check) for name, check in checks.items()}
+        done, _ = wait(futures.values(), timeout=25)
+    for name, future in futures.items():
+        if future not in done:
+            results[name] = {"accessible": False, "message": "The check timed out."}
+            continue
+        try:
+            results[name] = future.result()
+        except Exception:
+            results[name] = {"accessible": False, "message": "The check could not be completed."}
+    provider_config.record_tests(results)
+    payload = _providers_payload()
+    for name, result in results.items():
+        provider = payload["providers"][name]
+        provider["accessible"] = result.get("accessible")
+        provider["message"] = str(result.get("message") or "")[:300]
+    return payload
 
 
 @app.get("/api/trader")
