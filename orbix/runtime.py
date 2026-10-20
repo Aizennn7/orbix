@@ -11,7 +11,7 @@ import threading
 from .abstentions import classify_reason
 from .calibration import reliability_bins
 from .candle_store import CandleStore, TAIL_ROWS
-from .domain import Candle, parse_datetime
+from .domain import Candle, format_datetime, parse_datetime
 from .engine import PredictionEngine
 from .features import FEATURE_NAMES, FEATURE_VERSION, compute_features
 from .learning import ModelRegistry, SelfLearningEngine, engine_config_from_env
@@ -175,6 +175,12 @@ class Runtime:
             self.models.clear()
             self._ensembles.clear()
             self._learning.clear()
+            if self.candles:
+                # Incremental learning starts after the imported history. It is
+                # not a silent backfill of thousands of historical bars.
+                self.ledger.seed_dataset_learning(
+                    self._dataset_id, self.candles[-1].timestamp + timedelta(minutes=1)
+                )
         return result
 
     def append_csv_file(self, csv_path: str | Path, pair: str | None = None) -> dict:
@@ -190,6 +196,9 @@ class Runtime:
             result["shadow_model_updates"] = sum(
                 1 for outcome in outcomes if outcome.get("kind") == "shadow" and outcome["learned"]
             )
+            dataset_learning = self.learn_dataset_outcomes()
+            result["dataset_learning"] = dataset_learning
+            result["dataset_model_updates"] = int(dataset_learning.get("learned", 0))
             return result
 
     def training_candles(self, limit: int = MODEL_TRAINING_WINDOW) -> list[Candle]:
@@ -290,7 +299,7 @@ class Runtime:
         )
         for event in self.ledger.list_engine_events(25, dataset_id=dataset_id):
             engine.events.append(event)
-        for row in self.ledger.learning_history(600):
+        for row in self.ledger.learning_history(600, dataset_id=dataset_id):
             try:
                 moment = parse_datetime(row["created_at"]) if row.get("created_at") else None
             except (ValueError, TypeError):
@@ -304,9 +313,9 @@ class Runtime:
             if row.get("model_updated"):
                 engine.accepted_updates += 1
         engine.updates_since_calibration = engine.accepted_updates
-        for row in self.ledger.learning_replay(engine.replay_capacity):
+        for row in self.ledger.learning_replay(engine.replay_capacity, dataset_id=dataset_id):
             engine.replay.append((row["features"], int(row["label"])))
-        for row in self.ledger.shadow_history(600):
+        for row in self.ledger.shadow_history(600, dataset_id=dataset_id):
             try:
                 moment = parse_datetime(row["created_at"]) if row.get("created_at") else None
             except (ValueError, TypeError):
@@ -318,6 +327,18 @@ class Runtime:
                 timestamp=moment,
             )
         engine.shadow_observations = engine.shadow_tracker.total_seen
+        for row in self.ledger.dataset_history(600, dataset_id=dataset_id):
+            try:
+                moment = parse_datetime(row["created_at"]) if row.get("created_at") else None
+            except (ValueError, TypeError):
+                moment = None
+            engine.dataset_tracker.observe(
+                row.get("probability_up"),
+                row.get("label"),
+                correct=None if row.get("correct") is None else bool(row["correct"]),
+                timestamp=moment,
+            )
+        engine.dataset_observations = engine.dataset_tracker.total_seen
         engine.version = registry.active_version()
         self._learning[key] = engine
         self._last_promotion_seen.setdefault(key, engine.tracker.total_seen)
@@ -338,6 +359,7 @@ class Runtime:
                     model_updated=False,
                     kind="paper",
                     features=features,
+                    entry_time=record.get("entry_time"),
                 )
                 return {"learned": False, "reason": "No directional label was available (flat/tied outcome)."}
             if record["source"] != "IMPORTED CSV":
@@ -356,6 +378,7 @@ class Runtime:
                     model_updated=False,
                     kind="paper",
                     features=features,
+                    entry_time=record.get("entry_time"),
                 )
                 return {"learned": False, "reason": str(exc)}
 
@@ -376,6 +399,7 @@ class Runtime:
                 model_updated=bool(result["accepted"]),
                 kind="paper",
                 features=features,
+                entry_time=record.get("entry_time"),
             )
             calibration = None
             if model.calibrator.fitted:
@@ -417,6 +441,7 @@ class Runtime:
                 model_updated=False,
                 kind="shadow",
                 features=features,
+                entry_time=record.get("entry_time"),
             )
             self.ledger.mark_shadow_learned(record["shadow_id"], False)
             return {"learned": False, "reason": "No directional label was available (flat/tied outcome)."}
@@ -444,6 +469,7 @@ class Runtime:
             model_updated=bool(result["accepted"]),
             kind="shadow",
             features=features,
+            entry_time=record.get("entry_time"),
         )
         self.ledger.mark_shadow_learned(record["shadow_id"], bool(result["accepted"]))
 
@@ -465,6 +491,144 @@ class Runtime:
             "calibration": calibration,
             "shadow": True,
         }
+
+    def learn_dataset_outcomes(self, horizon: int = 1) -> dict:
+        """Learn one test-before-learn outcome per completed bar.
+
+        This is the dataset-wide stream: every bar whose expiry is known gets a
+        prequential prediction and an outcome, whether or not a signal was
+        delivered. It runs automatically after candles are appended and is
+        idempotent: a deterministic event id and a persisted cursor prevent a
+        restart from learning the same bar twice.
+
+        Rows are labelled ``kind='dataset'`` and never enter the paper tracker,
+        win rate, Telegram, or per-strategy statistics.
+        """
+        with self.lock:
+            if self.source != "IMPORTED CSV" or not self._dataset_id:
+                return {"status": "skipped", "reason": "Dataset learning runs only on imported candle data."}
+            if not self.settings.get("dataset_learning", True):
+                return {"status": "disabled", "reason": "ORBIX_DATASET_LEARNING is false."}
+            horizon = max(1, int(horizon))
+            candles = self.candles
+            if len(candles) < 40 + horizon:
+                return {"status": "skipped", "reason": "Not enough candles to label a completed horizon."}
+
+            dataset_id = self._dataset_id
+            latest_entry = candles[-1].timestamp + timedelta(minutes=1)
+            marker = self.ledger.last_dataset_entry_time(dataset_id)
+            if marker is None:
+                self.ledger.seed_dataset_learning(dataset_id, latest_entry)
+                return {
+                    "status": "seeded",
+                    "processed": 0,
+                    "learned": 0,
+                    "reason": "Learning starts at the newest bar; imported history is not backfilled.",
+                }
+
+            marker_time = parse_datetime(marker)
+            candidates = []
+            for index in range(0, len(candles) - horizon):
+                entry_time = candles[index].timestamp + timedelta(minutes=1)
+                if entry_time <= marker_time:
+                    continue
+                if candles[index + horizon].timestamp - candles[index].timestamp != timedelta(minutes=horizon):
+                    continue  # a data gap would fake a horizon, so skip it
+                candidates.append(index)
+            if not candidates:
+                return {"status": "no_new", "processed": 0, "learned": 0}
+
+            rows = compute_features(candles)
+            try:
+                model = self.get_or_train_model(self.pair)
+            except ValueError as exc:
+                return {"status": "no_model", "processed": 0, "learned": 0, "reason": str(exc)}
+            engine = self.learning_engine(self.pair)
+
+            processed = learned = rejected = ties = skipped = covered_by_signal = 0
+            last_entry = marker_time
+            for index in candidates:
+                entry_time = candles[index].timestamp + timedelta(minutes=1)
+                last_entry = entry_time
+                features = rows[index]
+                if features is None:
+                    continue
+                processed += 1
+                signal_id = f"dataset:{dataset_id}:{format_datetime(entry_time)}"
+                if self.ledger.has_learning_event(signal_id):
+                    skipped += 1
+                    continue
+                if self.ledger.has_learning_for_entry(dataset_id, entry_time):
+                    # The paper or shadow stream already learned this bar; do not
+                    # double-weight the same outcome.
+                    covered_by_signal += 1
+                    continue
+                entry_price = candles[index].close
+                exit_price = candles[index + horizon].close
+                issued = model.predict_up(features)
+                if exit_price == entry_price:
+                    self.ledger.record_learning_event(
+                        signal_id=signal_id,
+                        pair=self.pair,
+                        dataset_id=dataset_id,
+                        label=None,
+                        probability_up=issued,
+                        correct=None,
+                        model_updated=False,
+                        kind="dataset",
+                        features=features,
+                        entry_time=format_datetime(entry_time),
+                    )
+                    ties += 1
+                    continue
+                label = int(exit_price > entry_price)
+                result = engine.observe(
+                    model,
+                    features,
+                    label,
+                    issued_probability=issued,
+                    dataset=True,
+                )
+                self.ledger.record_learning_event(
+                    signal_id=signal_id,
+                    pair=self.pair,
+                    dataset_id=dataset_id,
+                    label=label,
+                    probability_up=result["issued_probability"],
+                    correct=result["issued_correct"],
+                    model_updated=bool(result["accepted"]),
+                    kind="dataset",
+                    features=features,
+                    entry_time=format_datetime(entry_time),
+                )
+                if result["accepted"]:
+                    learned += 1
+                else:
+                    rejected += 1
+
+            calibration = None
+            if model.calibrator.fitted:
+                if engine.should_recalibrate():
+                    calibration = engine.recalibrate(model)
+            elif len(engine.replay) >= 60:
+                calibration = engine.recalibrate(model, force=True)
+            changed = bool(learned) or bool(calibration is not None and calibration.get("accepted"))
+            if changed:
+                self._ensembles.pop(self.pair, None)
+                self._save_champion(self.pair, model)
+                self.models[self.pair] = model
+            self.ledger.set_dataset_entry_time(dataset_id, last_entry)
+            return {
+                "status": "learned" if processed else "no_new",
+                "processed": processed,
+                "learned": learned,
+                "rejected": rejected,
+                "ties": ties,
+                "already_seen": skipped,
+                "covered_by_signal": covered_by_signal,
+                "last_entry_time": format_datetime(last_entry),
+                "calibration": calibration,
+            }
 
     # ------------------------------------------------------------------ signals
     def generate_signal(
@@ -705,7 +869,11 @@ class Runtime:
             if model is None:
                 return {"status": "skipped", "reason": "No trained champion exists yet."}
             engine = self.learning_engine(self.pair)
-            drift = engine.drift.peek(engine.tracker.errors())
+            dataset_stream = engine.dataset_tracker.total_seen >= 40
+            drift = (
+                engine.dataset_drift.peek(engine.dataset_tracker.errors())
+                if dataset_stream else engine.drift.peek(engine.tracker.errors())
+            )
             result: dict = {"drift": drift, "recalibrated": False, "retrained": False}
             if len(engine.replay) >= 60 and (not model.calibrator.fitted or engine.should_recalibrate()):
                 report = engine.recalibrate(model, force=True)
@@ -718,7 +886,8 @@ class Runtime:
             # bootstrap members on the slow maintenance cadence.
             self._ensembles.pop(self.pair, None)
             key = self._learning_key(self.pair)
-            learned_since = engine.tracker.total_seen - self._last_promotion_seen.get(key, 0)
+            observed = max(engine.tracker.total_seen, engine.dataset_tracker.total_seen)
+            learned_since = observed - self._last_promotion_seen.get(key, 0)
             if drift["state"] == "drift" and learned_since >= 100:
                 try:
                     result["retrain"] = self.retrain_model(self.pair)
@@ -726,7 +895,7 @@ class Runtime:
                 except ValueError as exc:
                     result["retrain_error"] = str(exc)
                 # One attempt per 100 newly resolved outcomes, promoted or not.
-                self._last_promotion_seen[key] = engine.tracker.total_seen
+                self._last_promotion_seen[key] = observed
             return result
 
     # ------------------------------------------------------------------ status
@@ -740,6 +909,35 @@ class Runtime:
             "They feed the model and calibration only; they are not paper trades or delivery candidates."
         )
         return block
+
+    def dataset_learning_status(self) -> dict:
+        """Counters for the every-completed-bar stream, without forcing an engine."""
+        with self.lock:
+            dataset_id = self.dataset_id()
+            block = (
+                self.ledger.dataset_summary(dataset_id)
+                if dataset_id else self.ledger.dataset_summary()
+            )
+            block["enabled"] = bool(self.settings.get("dataset_learning", True))
+            block["last_cursor"] = (
+                self.ledger.last_dataset_entry_time(dataset_id) if dataset_id else None
+            )
+            if self.candles:
+                latest_entry = self.candles[-1].timestamp + timedelta(minutes=1)
+                block["latest_entry"] = format_datetime(latest_entry)
+                cursor = block["last_cursor"]
+                if cursor:
+                    block["unlearned_minutes"] = max(0, int((latest_entry - parse_datetime(cursor)).total_seconds() // 60))
+            if dataset_id:
+                engine = self._learning.get(self._learning_key(self.pair))
+                if engine is not None:
+                    block["tracker"] = engine.dataset_tracker.summary()
+                    block["drift"] = engine.dataset_drift.peek(engine.dataset_tracker.errors())
+            block["note"] = (
+                "One test-before-learn update per completed bar, whether or not a signal was "
+                "delivered. These are not paper trades and are excluded from win rate and Telegram."
+            )
+            return block
 
     def model_card(self, pair: str) -> dict:
         pair = pair.upper().strip()
@@ -817,6 +1015,7 @@ class Runtime:
                 "learning_events": learning_status["events"] if learning_status else [],
                 "learning_counts": learning_status["counts"] if learning_status else None,
                 "shadow": self._shadow_block(pair, engine),
+                "dataset": self.dataset_learning_status(),
                 "versions": registry.list_versions(limit=8) if registry else [],
                 "active_version": registry.active_version() if registry else None,
                 "by_strategy": self.ledger.learning_by_strategy(dataset_id=self.dataset_id()),
@@ -873,6 +1072,7 @@ class Runtime:
             "drift": engine.drift.peek(engine.tracker.errors()) if engine else {"state": "untracked"},
             "learning_engine": engine.status() if engine else None,
             "shadow": self._shadow_block(self.pair, engine),
+            "dataset": self.dataset_learning_status(),
             "versions": registry.list_versions(limit=8) if registry else [],
             "active_version": registry.active_version() if registry else None,
             "by_strategy": self.ledger.learning_by_strategy(),

@@ -318,6 +318,8 @@ class AutomationService:
         self.max_entry_delay_seconds = _env_int("ORBIX_MAX_ENTRY_DELAY_SECONDS", 10, 1, 30)
         self.max_bar_age_seconds = _env_int("ORBIX_MAX_BAR_AGE_SECONDS", 180, 60, 900)
         self.auto_signals_enabled = _env_bool("ORBIX_AUTO_SIGNALS", True)
+        self.auto_imported = _env_bool("ORBIX_AUTO_IMPORTED", True)
+        self.imported_max_entry_delay = _env_int("ORBIX_IMPORTED_MAX_ENTRY_DELAY_SECONDS", 120, 1, 3600)
         self.telegram = TelegramNotifier(
             os.getenv("ORBIX_TELEGRAM_BOT_TOKEN"),
             os.getenv("ORBIX_TELEGRAM_CHAT_ID"),
@@ -358,6 +360,9 @@ class AutomationService:
         self._user_paused = False
         self._feed_dataset_id: str | None = None
         self._last_analyzed_timestamp: datetime | None = None
+        self._last_imported_dataset_id: str | None = None
+        self._last_imported_timestamp: datetime | None = None
+        self._last_dataset_learning: dict[str, Any] | None = None
         self._latest_auto_signal: dict[str, Any] | None = None
         self._last_auto_status = self._strategy_config_error or "Waiting for a configured market feed and event calendar."
         self._market_last_sync: datetime | None = None
@@ -447,9 +452,12 @@ class AutomationService:
             self._market_error = message
             self._market_connected = False
 
-    def _entry_is_too_late(self, entry_time: datetime, now: datetime) -> bool:
+    def _entry_is_too_late(
+        self, entry_time: datetime, now: datetime, max_delay: int | None = None
+    ) -> bool:
         delay = (now - entry_time).total_seconds()
-        return delay < 0 or delay > self.max_entry_delay_seconds
+        limit = self.max_entry_delay_seconds if max_delay is None else max(1, int(max_delay))
+        return delay < 0 or delay > limit
 
     def _record_skip_abstention(self, entry_time: datetime | None, reason: str) -> None:
         """Log why a closed bar produced no signal. Never raises into the loop."""
@@ -468,32 +476,44 @@ class AutomationService:
             # A logging failure must never stop the feed.
             pass
 
-    def _analyze_new_bar(self, latest: Candle, now: datetime) -> None:
+    def _analyze_new_bar(
+        self,
+        latest: Candle,
+        now: datetime,
+        *,
+        pair: str | None = None,
+        is_live: bool = True,
+        require_news: bool = True,
+        max_delay: int | None = None,
+        use_feed_marker: bool = True,
+    ) -> None:
+        pair = (pair or self.market_pair).upper()
         entry_time = latest.timestamp + timedelta(minutes=1)
-        if self._last_analyzed_timestamp == latest.timestamp:
+        if use_feed_marker and self._last_analyzed_timestamp == latest.timestamp:
             return
-        if self._entry_is_too_late(entry_time, now):
-            self._last_analyzed_timestamp = latest.timestamp
+        if self._entry_is_too_late(entry_time, now, max_delay):
+            if use_feed_marker:
+                self._last_analyzed_timestamp = latest.timestamp
             self._last_auto_status = (
                 f"Skipped stale bar: its entry boundary passed by more than "
-                f"{self.max_entry_delay_seconds} seconds. Waiting for the next completed M1 candle."
+                f"{max_delay if max_delay is not None else self.max_entry_delay_seconds} seconds. "
+                "Waiting for the next completed M1 candle."
             )
             self._record_skip_abstention(entry_time, self._last_auto_status)
             self._save_marker()
             return
 
-        self._last_analyzed_timestamp = latest.timestamp
-        guard = self.calendar.evaluate(self.market_pair, now)
-        if guard["status"] != "CLEAR":
+        if use_feed_marker:
+            self._last_analyzed_timestamp = latest.timestamp
+        guard = self.calendar.evaluate(pair, now)
+        if require_news and guard["status"] != "CLEAR":
             self._last_auto_status = f"Automatic signal paused: {guard['message']}"
             self._record_skip_abstention(entry_time, self._last_auto_status)
             self._save_marker()
             return
 
         dataset_id = self.runtime.dataset_id()
-        if self.runtime.ledger.has_signal_for_time(
-            self.market_pair, self.strategy_id, dataset_id, entry_time
-        ):
+        if self.runtime.ledger.has_signal_for_time(pair, self.strategy_id, dataset_id, entry_time):
             self._last_auto_status = "This strategy already has a signal recorded for the current entry time; duplicate suppressed."
             self._record_skip_abstention(entry_time, self._last_auto_status)
             self._save_marker()
@@ -501,17 +521,18 @@ class AutomationService:
 
         try:
             signal = self.runtime.generate_signal(
-                self.market_pair,
+                pair,
                 self.strategy_id,
                 horizon=1,
                 generated_at=now,
-                is_live=True,
+                is_live=is_live,
             )
             strategy_name = next((item["name"] for item in EXECUTABLE_STRATEGIES if item["id"] == self.strategy_id), self.strategy_id)
             signal["heading"] = f"{strategy_name} · {signal['side']}"
             signal["automatic"] = True
             signal["automation_generated_at"] = format_datetime(now)
             signal["news_guard"] = guard
+            signal["paper_only"] = not is_live
             self._latest_auto_signal = signal
             with self._state_lock:
                 self._auto_signal_history.append({
@@ -526,14 +547,76 @@ class AutomationService:
                     "heading": signal.get("heading"),
                 })
                 self._auto_signal_history = self._auto_signal_history[-20:]
+            mode = "paper-only imported analysis" if not is_live else "automatic analysis"
             self._last_auto_status = (
-                f"Automatic analysis completed for {self.market_pair}; latest result: {signal['side']}. "
+                f"Completed {mode} for {pair}; latest result: {signal['side']}. "
                 f"Entry {signal['entry_time']} → prediction {signal['prediction_time']}."
             )
         except (ValueError, RuntimeError) as exc:
             self._last_auto_status = f"Automatic signal failed safely: {str(exc)[:240]}"
         self._save_marker()
         self._maybe_post_automatic_signal()
+
+    def _dataset_scan(self) -> dict[str, Any]:
+        """Watch the active imported dataset that is not a provider feed.
+
+        A static historical file has no new bars; the scanner records that state
+        once and stays idle. When a streaming append adds a fresh bar, the same
+        paper-only pipeline runs prediction, outcome resolution, and every-bar
+        learning without any manual click. Imported signals are never live and
+        are never auto-posted to Telegram.
+        """
+        if not self.auto_imported:
+            return {"status": "disabled", "reason": "ORBIX_AUTO_IMPORTED is false."}
+        now = datetime.now(UTC)
+        with self.runtime.lock:
+            source = self.runtime.source
+            dataset_id = self.runtime._dataset_id
+            pair = self.runtime.pair
+            latest = self.runtime.candles[-1] if self.runtime.candles else None
+        if source != "IMPORTED CSV" or not dataset_id or latest is None:
+            return {"status": "skipped", "reason": "No imported dataset is active."}
+        if dataset_id == self._feed_dataset_id:
+            return {"status": "provider_owned", "reason": "The provider loop already analyzes this dataset."}
+
+        if dataset_id != self._last_imported_dataset_id:
+            self._last_imported_dataset_id = dataset_id
+            self._last_imported_timestamp = None
+
+        learning = self.runtime.learn_dataset_outcomes()
+        with self._state_lock:
+            self._last_dataset_learning = learning
+
+        if self._last_imported_timestamp == latest.timestamp:
+            return {"status": "waiting", "dataset_learning": learning}
+        if not self.auto_signals_enabled:
+            return {"status": "disabled", "reason": "ORBIX_AUTO_SIGNALS is false."}
+
+        entry_time = latest.timestamp + timedelta(minutes=1)
+        age = (now - entry_time).total_seconds()
+        if age < -5:
+            return {"status": "future_bar", "dataset_learning": learning}
+        if age > self.max_bar_age_seconds:
+            self._last_imported_timestamp = latest.timestamp
+            self._last_auto_status = (
+                f"Imported dataset {dataset_id[:8]} is historical (latest bar "
+                f"{format_datetime(latest.timestamp)}); paper automation is watching for a new bar."
+            )
+            return {"status": "historical", "dataset_learning": learning}
+
+        self._last_imported_timestamp = latest.timestamp
+        self._analyze_new_bar(
+            latest,
+            now,
+            pair=pair,
+            is_live=False,
+            require_news=False,
+            max_delay=self.imported_max_entry_delay,
+            use_feed_marker=False,
+        )
+        with self._state_lock:
+            status = self._last_auto_status
+        return {"status": "analyzed", "auto_status": status, "dataset_learning": learning}
 
     def pause_market_feed(self) -> None:
         with self._sync_lock:
@@ -996,6 +1079,12 @@ class AutomationService:
             with self._state_lock:
                 self._telegram_last_skip_reason = "Latest automatic read used synthetic demo data; not posted."
             return
+        if not bool(signal.get("is_live", True)):
+            with self._state_lock:
+                self._telegram_last_skip_reason = (
+                    "Paper-only imported signal; automatic Telegram posting is limited to live provider signals."
+                )
+            return
         signal_id = str(signal.get("signal_id"))
         with self._state_lock:
             if signal_id in self._telegram_signal_ids or signal_id in self._telegram_inflight_signal_ids:
@@ -1100,11 +1189,20 @@ class AutomationService:
     async def _run(self) -> None:
         next_market = 0.0 if self.market_provider.configured else float("inf")
         next_calendar = 0.0 if self.calendar.configured else float("inf")
+        # Imported datasets are watched even without a provider key. The scan is
+        # a no-op for static historical files and drives streaming appends.
+        next_dataset = time.monotonic() + 5.0 if self.auto_imported else float("inf")
         # Calibration refit and drift-triggered retraining are checked on a slow
         # schedule; both are no-ops unless real imported outcomes exist.
         next_learning = time.monotonic() + 900.0
         while True:
             now = time.monotonic()
+            if self.auto_imported and now >= next_dataset:
+                try:
+                    await asyncio.to_thread(self._dataset_scan)
+                except Exception:
+                    pass
+                next_dataset = time.monotonic() + 30.0
             if self.calendar.configured and now >= next_calendar:
                 try:
                     await asyncio.to_thread(self.sync_calendar)
@@ -1124,7 +1222,8 @@ class AutomationService:
                     pass
                 next_learning = time.monotonic() + 900.0
             deadlines = [
-                deadline for deadline in (next_market, next_calendar, next_learning) if deadline != float("inf")
+                deadline for deadline in (next_market, next_calendar, next_dataset, next_learning)
+                if deadline != float("inf")
             ]
             if not deadlines:
                 await asyncio.sleep(30)
@@ -1170,12 +1269,32 @@ class AutomationService:
             and dataset_id == self._feed_dataset_id
         )
         news_ready = guard["status"] == "CLEAR" and calendar_status["connected"]
+        paper_enabled = bool(
+            self.auto_imported
+            and self.auto_signals_enabled
+            and source == "IMPORTED CSV"
+            and not provider_dataset_active
+        )
+        paper_active = bool(paper_enabled and latest is not None)
         return {
             "server_time": format_datetime(now),
             "pair": self.market_pair,
             "strategy": self.strategy_id,
             "auto_signals_enabled": self.auto_signals_enabled,
+            "auto_imported": self.auto_imported,
             "automatic_signals_active": bool(market_ready and news_ready and self.auto_signals_enabled),
+            "paper_automation_enabled": paper_enabled,
+            "paper_automation_active": paper_active,
+            "paper_automation_note": (
+                "Imported datasets are watched for newly appended fresh bars. Signals are paper-only, "
+                "the news guard is recorded but not required, and Telegram auto-posting is disabled."
+                if paper_enabled else None
+            ),
+            "latest_imported_bar": latest.to_dict() if (latest and paper_enabled) else None,
+            "imported_bar_age_seconds": latest_bar_age_seconds if paper_enabled else None,
+            "imported_max_entry_delay_seconds": self.imported_max_entry_delay,
+            "dataset_learning": self.runtime.dataset_learning_status(),
+            "last_dataset_learning": self._last_dataset_learning,
             "market": {
                 "provider": "Twelve Data",
                 "configured": self.market_provider.configured,
@@ -1290,6 +1409,15 @@ class AutomationService:
             "Automatic signals are enabled." if self.auto_signals_enabled
             else "ORBIX_AUTO_SIGNALS is false.",
         )
+        check(
+            "paper_automation",
+            "Imported paper automation",
+            False,
+            "ready" if self.auto_imported else "warning",
+            "Watches imported datasets for newly appended fresh bars; signals are paper-only and never auto-posted."
+            if self.auto_imported
+            else "ORBIX_AUTO_IMPORTED is false.",
+        )
         model_ready = bool(model is not None and model.trained)
         check(
             "model",
@@ -1339,6 +1467,7 @@ class AutomationService:
             "ready": ready,
             "checks": checks,
             "shadow": shadow,
+            "dataset_learning": self.runtime.dataset_learning_status(),
             "warmup": {
                 "resolved_outcomes": resolved,
                 "updates_start_after": update_starts,

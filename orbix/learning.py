@@ -317,7 +317,10 @@ class SelfLearningEngine:
     tracker: PrequentialTracker = field(default_factory=PrequentialTracker)
     shadow_tracker: PrequentialTracker = field(default_factory=PrequentialTracker)
     shadow_observations: int = 0
+    dataset_tracker: PrequentialTracker = field(default_factory=PrequentialTracker)
+    dataset_observations: int = 0
     drift: DriftMonitor = field(default_factory=DriftMonitor)
+    dataset_drift: DriftMonitor = field(default_factory=DriftMonitor)
     replay: deque = field(default_factory=deque)
     accepted_updates: int = 0
     rejected_updates: int = 0
@@ -354,9 +357,12 @@ class SelfLearningEngine:
         issued_probability: float | None = None,
         timestamp: datetime | None = None,
         shadow: bool = False,
+        dataset: bool = False,
     ) -> dict:
         if label not in (0, 1):
             raise ValueError("Learning labels must be 0 (down) or 1 (up)")
+        if shadow and dataset:
+            raise ValueError("An observation cannot be both a shadow read and a dataset outcome")
         if not features:
             raise ValueError("Learning requires the stored feature row")
         if not model.trained:
@@ -370,7 +376,12 @@ class SelfLearningEngine:
         )
         correct_before = (prediction_before >= 0.5) == bool(label)
         issued_correct = (issued >= 0.5) == bool(label)
-        if shadow:
+        if dataset:
+            # Every completed bar gets a test-before-learn observation in its own
+            # stream. It must not be confused with a delivered/paper signal.
+            self.dataset_tracker.observe(issued, int(label), correct=issued_correct, timestamp=timestamp)
+            self.dataset_observations += 1
+        elif shadow:
             # Shadow reads keep the replay and calibration honest without
             # polluting the live prequential record or the drift monitor.
             self.shadow_tracker.observe(issued, int(label), correct=issued_correct, timestamp=timestamp)
@@ -381,10 +392,14 @@ class SelfLearningEngine:
         while len(self.replay) > self.replay_capacity:
             self.replay.popleft()
 
-        drift_state = self.drift.evaluate(self.tracker.errors(), now=timestamp)
-        warming_up = (
-            self.shadow_tracker.total_seen if shadow else self.tracker.total_seen
-        ) < self.min_samples
+        if dataset:
+            drift_state = self.dataset_drift.evaluate(self.dataset_tracker.errors(), now=timestamp)
+            warming_up = self.dataset_tracker.total_seen < self.min_samples
+        else:
+            drift_state = self.drift.evaluate(self.tracker.errors(), now=timestamp)
+            warming_up = (
+                self.shadow_tracker.total_seen if shadow else self.tracker.total_seen
+            ) < self.min_samples
 
         before_loss = self._replay_log_loss(model)
         snapshot = model.snapshot()
@@ -402,8 +417,9 @@ class SelfLearningEngine:
             model.restore(snapshot)
             accepted = False
             self.rejected_updates += 1
+            prefix = "Dataset " if dataset else "Shadow " if shadow else ""
             self.last_rejection_reason = (
-                f"{'Shadow ' if shadow else ''}update reverted: replay log loss rose "
+                f"{prefix}update reverted: replay log loss rose "
                 f"from {before_loss:.4f} to {after_loss:.4f}."
             )
             reason = self.last_rejection_reason
@@ -415,6 +431,7 @@ class SelfLearningEngine:
         self.last_update_at = (timestamp or _now()).isoformat()
         return {
             "shadow": shadow,
+            "dataset": dataset,
             "learned": accepted,
             "evaluated": True,
             "warming_up": warming_up,
@@ -511,7 +528,10 @@ class SelfLearningEngine:
             "tracker_recent": self.tracker.summary(window=100),
             "shadow_tracker": self.shadow_tracker.summary(),
             "shadow_observations": self.shadow_observations,
+            "dataset_tracker": self.dataset_tracker.summary(),
+            "dataset_observations": self.dataset_observations,
             "drift": self.drift.peek(self.tracker.errors()),
+            "dataset_drift": self.dataset_drift.peek(self.dataset_tracker.errors()),
             "counts": {
                 "accepted_updates": self.accepted_updates,
                 "rejected_updates": self.rejected_updates,
@@ -547,8 +567,17 @@ def engine_config_from_env(environ) -> dict[str, Any]:
             return default
         return max(low, min(high, value))
 
+    def read_bool(name: str, default: bool) -> bool:
+        text = str(environ.get(name, default)).strip().lower()
+        if text in {"1", "true", "yes", "on"}:
+            return True
+        if text in {"0", "false", "no", "off"}:
+            return False
+        return default
+
     return {
         "ensemble_size": read_int("ORBIX_ENSEMBLE_SIZE", 3, 2, 5),
+        "dataset_learning": read_bool("ORBIX_DATASET_LEARNING", True),
         "max_uncertainty": read_float("ORBIX_MAX_UNCERTAINTY", 0.10, 0.0, 0.5),
         "max_degradation": read_float("ORBIX_MAX_UPDATE_DEGRADATION", 0.02, 0.0, 0.5),
         "recalibrate_every": read_int("ORBIX_RECALIBRATE_EVERY", 50, 10, 1000),

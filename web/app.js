@@ -143,8 +143,15 @@ async function refreshAutomationStatus() {
     $("#connectionIndicator").classList.toggle("is-configured", Boolean(market.configured && market.connected));
     $("#connectionIndicator").classList.toggle("is-pending", Boolean(market.configured && !market.connected));
 
-    $("#autoSignalState").textContent = active ? "ACTIVE · NEW CLOSED BARS ONLY" : "PAUSED · PROVIDER REQUIREMENTS";
-    $("#autoSignalDetail").textContent = `${data.auto_status} News guard: ${guard.status.toLowerCase()}.`;
+    const paper = Boolean(data.paper_automation_active);
+    $("#autoSignalState").textContent = active
+      ? "ACTIVE · NEW CLOSED BARS ONLY"
+      : paper ? "ACTIVE · IMPORTED PAPER" : "PAUSED · PROVIDER REQUIREMENTS";
+    const learned = data.dataset_learning || {};
+    const learningNote = learned.resolved
+      ? ` Dataset outcomes: ${Number(learned.learned || 0).toLocaleString()}/${Number(learned.resolved || 0).toLocaleString()} kept.`
+      : "";
+    $("#autoSignalDetail").textContent = `${data.auto_status} News guard: ${guard.status.toLowerCase()}.${learningNote}${paper ? " Paper-only imported signals are never auto-posted." : ""}`;
     $("#newsGuardState").textContent = guard.status === "BLACKOUT" ? "NEWS BLACKOUT" : guard.status;
     $("#newsGuardDetail").textContent = guard.message || "Economic-calendar state unavailable.";
     renderUpcomingEvents(guard);
@@ -1643,6 +1650,13 @@ function renderModelCard(data) {
   $("#modelShadow").textContent = shadow.total
     ? `Shadow learning: ${Number(shadow.resolved || 0).toLocaleString()} resolved, ${Number(shadow.learned || 0).toLocaleString()} updates kept${shadowTracker.accuracy == null ? "" : `, ${(Number(shadowTracker.accuracy) * 100).toFixed(1)}% direction accuracy`}${shadowTracker.brier == null ? "" : `, Brier ${Number(shadowTracker.brier).toFixed(3)}`}. Counterfactual only — never traded or delivered.`
     : "";
+  const dataset = data.dataset || {};
+  const datasetTracker = dataset.tracker || {};
+  $("#modelDataset").textContent = dataset.resolved
+    ? `Dataset learning: ${Number(dataset.learned || 0).toLocaleString()} of ${Number(dataset.resolved || 0).toLocaleString()} completed-bar outcomes kept${dataset.accuracy == null ? "" : `, ${(Number(dataset.accuracy) * 100).toFixed(1)}% next-bar accuracy`}${datasetTracker.brier == null ? "" : `, Brier ${Number(datasetTracker.brier).toFixed(3)}`}${dataset.last_cursor ? ` · cursor ${compactTime(dataset.last_cursor)}` : ""}. Prequential and not paper trades.`
+    : dataset.enabled
+      ? "Dataset learning is on; no completed bar has been labelled yet."
+      : "Dataset learning is disabled (ORBIX_DATASET_LEARNING).";
 
   const prequential = data.prequential;
   const recordText = prequential?.samples

@@ -10,6 +10,23 @@ from .abstentions import REASON_LABELS, SESSION_ORDER, classify_reason, hour_buc
 from .metrics import wilson_interval
 
 
+def _normalise_entry_time(value: datetime | str | None) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        moment = value
+    else:
+        text = str(value).strip()
+        if not text:
+            return None
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        moment = datetime.fromisoformat(text)
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment.astimezone(timezone.utc).isoformat()
+
+
 class PaperLedger:
     """Small SQLite ledger for manually confirmed paper outcomes."""
 
@@ -91,6 +108,18 @@ class PaperLedger:
                 connection.execute("ALTER TABLE learning_events ADD COLUMN kind TEXT NOT NULL DEFAULT 'paper'")
             if "features_json" not in learning_columns:
                 connection.execute("ALTER TABLE learning_events ADD COLUMN features_json TEXT NOT NULL DEFAULT ''")
+            if "entry_time" not in learning_columns:
+                connection.execute("ALTER TABLE learning_events ADD COLUMN entry_time TEXT NOT NULL DEFAULT ''")
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS learning_events_kind ON learning_events (kind, dataset_id, entry_time)"
+            )
+            connection.execute(
+                """CREATE TABLE IF NOT EXISTS learning_state (
+                    dataset_id TEXT PRIMARY KEY,
+                    last_entry_time TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )"""
+            )
             connection.execute(
                 """CREATE TABLE IF NOT EXISTS shadow_signals (
                     shadow_id TEXT PRIMARY KEY,
@@ -414,13 +443,14 @@ class PaperLedger:
         *,
         kind: str = "paper",
         features: dict[str, float] | None = None,
+        entry_time: str | None = None,
     ) -> None:
         with self._connect() as connection:
             connection.execute(
                 """INSERT OR IGNORE INTO learning_events
                    (signal_id, pair, dataset_id, label, probability_up, correct, model_updated,
-                    created_at, kind, features_json)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    created_at, kind, features_json, entry_time)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     signal_id,
                     pair,
@@ -432,8 +462,33 @@ class PaperLedger:
                     datetime.now(timezone.utc).isoformat(),
                     kind,
                     json.dumps(features or {}),
+                    entry_time or "",
                 ),
             )
+
+    def has_learning_event(self, signal_id: str) -> bool:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT 1 FROM learning_events WHERE signal_id = ? LIMIT 1", (signal_id,)
+            ).fetchone()
+        return row is not None
+
+    def has_learning_for_entry(
+        self, dataset_id: str, entry_time: datetime | str, kinds: tuple[str, ...] = ("paper", "shadow")
+    ) -> bool:
+        """True when this bar was already learned through a signal stream."""
+        value = _normalise_entry_time(entry_time)
+        if not value or not kinds:
+            return False
+        placeholders = ", ".join("?" for _ in kinds)
+        with self._connect() as connection:
+            row = connection.execute(
+                f"""SELECT 1 FROM learning_events
+                   WHERE dataset_id = ? AND entry_time = ? AND kind IN ({placeholders})
+                   LIMIT 1""",
+                (dataset_id, value, *kinds),
+            ).fetchone()
+        return row is not None
 
     def learning_summary(self) -> dict:
         with self._connect() as connection:
@@ -450,6 +505,15 @@ class PaperLedger:
                 """SELECT COUNT(*), COALESCE(SUM(model_updated), 0)
                    FROM learning_events WHERE kind = 'shadow'"""
             ).fetchone()
+            dataset_row = connection.execute(
+                """SELECT COUNT(*),
+                          COALESCE(SUM(CASE WHEN label IS NOT NULL THEN 1 ELSE 0 END), 0),
+                          COALESCE(SUM(model_updated), 0),
+                          COALESCE(SUM(CASE WHEN correct = 1 THEN 1 ELSE 0 END), 0),
+                          COALESCE(SUM(CASE WHEN correct IS NOT NULL THEN 1 ELSE 0 END), 0),
+                          MAX(entry_time)
+                   FROM learning_events WHERE kind = 'dataset'"""
+            ).fetchone()
         correct = int(row[4])
         evaluated = int(row[5])
         return {
@@ -462,41 +526,52 @@ class PaperLedger:
             "last_update": row[3],
             "shadow_resolved": int(shadow_row[0]),
             "shadow_learned": int(shadow_row[1]),
+            "dataset_resolved": int(dataset_row[1]),
+            "dataset_learned": int(dataset_row[2]),
+            "dataset_accuracy": (
+                int(dataset_row[3]) / int(dataset_row[4]) if int(dataset_row[4]) else None
+            ),
+            "dataset_last_entry": dataset_row[5] or None,
         }
 
-    def learning_history(self, limit: int = 600) -> list[dict]:
-        """Resolved predictions in chronological order, for tracker hydration."""
+    def _kind_history(self, kind: str, limit: int, dataset_id: str | None = None) -> list[dict]:
+        clause = " AND dataset_id = ?" if dataset_id else ""
+        parameters = (dataset_id,) if dataset_id else ()
         with self._connect() as connection:
             rows = connection.execute(
-                """SELECT probability_up, label, correct, model_updated, created_at FROM learning_events
-                   WHERE kind = 'paper' AND probability_up IS NOT NULL AND label IN (0, 1)
+                f"""SELECT probability_up, label, correct, model_updated, entry_time, created_at
+                   FROM learning_events
+                   WHERE kind = ? AND probability_up IS NOT NULL AND label IN (0, 1){clause}
                    ORDER BY created_at DESC LIMIT ?""",
-                (max(1, int(limit)),),
+                (kind, *parameters, max(1, int(limit))),
             ).fetchall()
         return [dict(row) for row in reversed(rows)]
 
-    def shadow_history(self, limit: int = 600) -> list[dict]:
+    def learning_history(self, limit: int = 600, dataset_id: str | None = None) -> list[dict]:
+        """Resolved paper predictions in chronological order, for tracker hydration."""
+        return self._kind_history("paper", limit, dataset_id)
+
+    def shadow_history(self, limit: int = 600, dataset_id: str | None = None) -> list[dict]:
         """Shadow predictions in chronological order, for a separate tracker."""
-        with self._connect() as connection:
-            rows = connection.execute(
-                """SELECT probability_up, label, correct, created_at FROM learning_events
-                   WHERE kind = 'shadow' AND probability_up IS NOT NULL AND label IN (0, 1)
-                   ORDER BY created_at DESC LIMIT ?""",
-                (max(1, int(limit)),),
-            ).fetchall()
-        return [dict(row) for row in reversed(rows)]
+        return self._kind_history("shadow", limit, dataset_id)
 
-    def learning_replay(self, limit: int = 200) -> list[dict]:
+    def dataset_history(self, limit: int = 600, dataset_id: str | None = None) -> list[dict]:
+        """Every completed-bar label in chronological order, for its own tracker."""
+        return self._kind_history("dataset", limit, dataset_id)
+
+    def learning_replay(self, limit: int = 200, dataset_id: str | None = None) -> list[dict]:
         """Stored feature rows and labels for guarded replay checks."""
+        clause = " AND le.dataset_id = ?" if dataset_id else ""
+        parameters = (dataset_id,) if dataset_id else ()
         with self._connect() as connection:
             rows = connection.execute(
-                """SELECT le.label, le.probability_up,
+                f"""SELECT le.label, le.probability_up,
                           COALESCE(NULLIF(le.features_json, ''), s.features_json) AS features_json
                    FROM learning_events le LEFT JOIN signals s ON s.signal_id = le.signal_id
-                   WHERE le.label IN (0, 1)
-                     AND COALESCE(NULLIF(le.features_json, ''), s.features_json) NOT IN ('', '{}')
+                   WHERE le.label IN (0, 1){clause}
+                     AND COALESCE(NULLIF(le.features_json, ''), s.features_json) NOT IN ('', '{{}}')
                    ORDER BY le.created_at DESC LIMIT ?""",
-                (max(1, int(limit)),),
+                (*parameters, max(1, int(limit))),
             ).fetchall()
         result = []
         for row in reversed(rows):
@@ -711,6 +786,66 @@ class PaperLedger:
             "accuracy": (wins / decisive) if decisive else None,
             "accuracy_ci95": wilson_interval(wins, decisive),
         }
+
+    def dataset_summary(self, dataset_id: str | None = None) -> dict:
+        """Counts for the every-completed-bar learning stream."""
+        clause = " AND dataset_id = ?" if dataset_id else ""
+        parameters = (dataset_id,) if dataset_id else ()
+        with self._connect() as connection:
+            row = connection.execute(
+                f"""SELECT COUNT(*),
+                           COALESCE(SUM(CASE WHEN label IS NOT NULL THEN 1 ELSE 0 END), 0),
+                           COALESCE(SUM(model_updated), 0),
+                           COALESCE(SUM(CASE WHEN correct = 1 THEN 1 ELSE 0 END), 0),
+                           COALESCE(SUM(CASE WHEN correct IS NOT NULL THEN 1 ELSE 0 END), 0),
+                           MAX(entry_time)
+                   FROM learning_events WHERE kind = 'dataset'{clause}""",
+                parameters,
+            ).fetchone()
+        scored = int(row[4])
+        return {
+            "total": int(row[0]),
+            "resolved": int(row[1]),
+            "learned": int(row[2]),
+            "correct": int(row[3]),
+            "scored": scored,
+            "accuracy": (int(row[3]) / scored) if scored else None,
+            "accuracy_ci95": wilson_interval(int(row[3]), scored),
+            "last_entry_time": row[5] or None,
+        }
+
+    def seed_dataset_learning(self, dataset_id: str, entry_time: datetime | str) -> None:
+        """Remember where incremental learning starts; never move an existing marker back."""
+        value = _normalise_entry_time(entry_time)
+        if value is None:
+            return
+        with self._connect() as connection:
+            connection.execute(
+                """INSERT OR IGNORE INTO learning_state (dataset_id, last_entry_time, updated_at)
+                   VALUES (?, ?, ?)""",
+                (dataset_id, value, datetime.now(timezone.utc).isoformat()),
+            )
+
+    def last_dataset_entry_time(self, dataset_id: str) -> str | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT last_entry_time FROM learning_state WHERE dataset_id = ?", (dataset_id,)
+            ).fetchone()
+        return row[0] if row else None
+
+    def set_dataset_entry_time(self, dataset_id: str, entry_time: datetime | str) -> None:
+        value = _normalise_entry_time(entry_time)
+        if value is None:
+            return
+        with self._connect() as connection:
+            connection.execute(
+                """INSERT INTO learning_state (dataset_id, last_entry_time, updated_at)
+                   VALUES (?, ?, ?)
+                   ON CONFLICT(dataset_id) DO UPDATE SET
+                     last_entry_time = excluded.last_entry_time,
+                     updated_at = excluded.updated_at""",
+                (dataset_id, value, datetime.now(timezone.utc).isoformat()),
+            )
 
     # ------------------------------------------------------------- audit events
     def record_engine_event(
