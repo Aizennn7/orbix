@@ -40,6 +40,13 @@ STRATEGY_CATALOG = [
 
 EXECUTABLE_STRATEGIES = [
     {
+        "id": "orbix_confluence",
+        "name": "Orbix Confluence Gate",
+        "category": "regime-aware trend continuation",
+        "description": "Original 6-check rule set: EMA regime, multi-bar momentum, RSI band, directional ADX, candle quality, and prior-range breakout. Requires 5 checks; a prequential model vetoes disagreement when trained. Abstains in extreme volatility.",
+        "prototype": True,
+    },
+    {
         "id": "ml_consensus",
         "name": "Orbix ML + trend agreement",
         "category": "machine learning",
@@ -101,6 +108,67 @@ def decide(
     rsi = features["rsi"]
     rsi_previous = features["rsi_previous"]
     close = candle.close
+
+    if strategy_id == "orbix_confluence":
+        atr_pct = features["atr_pct"]
+        if atr_pct <= 0.0 or atr_pct > 0.004:
+            return Decision(
+                "NO SIGNAL",
+                "Orbix Confluence Gate abstains: one-minute volatility is outside its pre-set operating band.",
+                probability_up,
+            )
+
+        checks = {
+            "trend": {
+                "BUY": ema_fast > ema_slow and close > ema_fast,
+                "SELL": ema_fast < ema_slow and close < ema_fast,
+            },
+            "momentum": {
+                "BUY": features["return_1"] > 0 and features["return_3"] > 0,
+                "SELL": features["return_1"] < 0 and features["return_3"] < 0,
+            },
+            "RSI band": {
+                "BUY": 50.0 <= rsi <= 68.0,
+                "SELL": 32.0 <= rsi <= 50.0,
+            },
+            "directional ADX": {
+                "BUY": features["adx"] >= 18.0 and features["plus_di"] > features["minus_di"],
+                "SELL": features["adx"] >= 18.0 and features["minus_di"] > features["plus_di"],
+            },
+            "candle quality": {
+                "BUY": features["body_atr_ratio"] >= 0.12 and features["body_atr_ratio"] <= 1.5 and features["close_position"] >= 0.65,
+                "SELL": features["body_atr_ratio"] >= 0.12 and features["body_atr_ratio"] <= 1.5 and features["close_position"] <= 0.35,
+            },
+            "20-bar breakout": {
+                "BUY": close > features["prior_high_20"],
+                "SELL": close < features["prior_low_20"],
+            },
+        }
+        scores = {side: sum(criteria[side] for criteria in checks.values()) for side in ("BUY", "SELL")}
+        side = max(scores, key=scores.get)
+        score = scores[side]
+        model_agrees = probability_up is None or (
+            probability_up >= 0.53 if side == "BUY" else probability_up <= 0.47
+        )
+        if score >= 5 and checks["trend"][side] and checks["directional ADX"][side] and model_agrees:
+            aligned = ", ".join(name for name, criteria in checks.items() if criteria[side])
+            learned_guard = "; prequential model agrees" if probability_up is not None else "; model not ready, six-rule gate only"
+            return Decision(
+                side,
+                f"Orbix Confluence Gate {score}/6: {aligned}{learned_guard}. Rule score is not a calibrated probability.",
+                probability_up,
+            )
+        if score >= 5 and not model_agrees:
+            return Decision(
+                "NO SIGNAL",
+                f"Orbix Confluence Gate abstains: {side.lower()} rules passed {score}/6, but the prequential model vetoed disagreement. Model score is uncalibrated.",
+                probability_up,
+            )
+        return Decision(
+            "NO SIGNAL",
+            f"Orbix Confluence Gate abstains: strongest side passed {score}/6 checks; at least 5/6 plus trend and ADX alignment are required.",
+            probability_up,
+        )
 
     if strategy_id == "ml_consensus":
         if probability_up is None:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from statistics import mean, pstdev
+from statistics import mean, median, pstdev
 
 from .domain import Candle
 
@@ -71,6 +71,40 @@ def _atr(candles: list[Candle], period: int = 14) -> list[float | None]:
     return result
 
 
+def _adx(candles: list[Candle], period: int = 14) -> tuple[list[float | None], list[float | None], list[float | None]]:
+    """Calculate a transparent rolling ADX and its directional indicators."""
+    true_ranges: list[float] = []
+    positive_moves: list[float] = []
+    negative_moves: list[float] = []
+    for index, candle in enumerate(candles):
+        previous = candles[index - 1] if index else candle
+        upward = candle.high - previous.high
+        downward = previous.low - candle.low
+        positive_moves.append(upward if upward > downward and upward > 0 else 0.0)
+        negative_moves.append(downward if downward > upward and downward > 0 else 0.0)
+        true_ranges.append(max(candle.high - candle.low, abs(candle.high - previous.close), abs(candle.low - previous.close)))
+
+    adx: list[float | None] = [None] * len(candles)
+    plus_di: list[float | None] = [None] * len(candles)
+    minus_di: list[float | None] = [None] * len(candles)
+    dx: list[float | None] = [None] * len(candles)
+    for index in range(period - 1, len(candles)):
+        start = index - period + 1
+        true_range = sum(true_ranges[start : index + 1])
+        if true_range <= 0:
+            continue
+        positive = 100.0 * sum(positive_moves[start : index + 1]) / true_range
+        negative = 100.0 * sum(negative_moves[start : index + 1]) / true_range
+        plus_di[index] = positive
+        minus_di[index] = negative
+        denominator = positive + negative
+        dx[index] = 100.0 * abs(positive - negative) / denominator if denominator else 0.0
+        dx_start = index - period + 1
+        if dx_start >= period - 1 and all(value is not None for value in dx[dx_start : index + 1]):
+            adx[index] = mean(value for value in dx[dx_start : index + 1] if value is not None)
+    return adx, plus_di, minus_di
+
+
 def _rolling_std(values: list[float], end: int, period: int) -> float | None:
     start = end - period + 1
     if start < 0:
@@ -88,13 +122,23 @@ def compute_features(candles: list[Candle]) -> list[dict[str, float] | None]:
     ema_slow = _ema(closes, 20)
     rsi_values = _rsi(closes, 14)
     atr_values = _atr(candles, 14)
+    adx_values, plus_di_values, minus_di_values = _adx(candles, 14)
     returns: list[float] = [0.0]
     for index in range(1, len(closes)):
         returns.append((closes[index] / closes[index - 1]) - 1.0)
 
     result: list[dict[str, float] | None] = []
     for index, candle in enumerate(candles):
-        if index < 20 or ema_fast[index] is None or ema_slow[index] is None or rsi_values[index] is None or atr_values[index] is None:
+        if (
+            index < 20
+            or ema_fast[index] is None
+            or ema_slow[index] is None
+            or rsi_values[index] is None
+            or atr_values[index] is None
+            or adx_values[index] is None
+            or plus_di_values[index] is None
+            or minus_di_values[index] is None
+        ):
             result.append(None)
             continue
 
@@ -111,6 +155,11 @@ def compute_features(candles: list[Candle]) -> list[dict[str, float] | None]:
         prior_high = max(item.high for item in candles[index - 20 : index])
         prior_low = min(item.low for item in candles[index - 20 : index])
         rsi_previous = rsi_values[index - 1] if rsi_values[index - 1] is not None else rsi_values[index]
+        recent_volume = [max(0.0, item.volume) for item in candles[max(0, index - 19) : index + 1]]
+        typical_volume = median(recent_volume) if recent_volume else 0.0
+        volume_ratio = candle.volume / typical_volume if typical_volume > 0 else 1.0
+        candle_range = candle.high - candle.low
+        close_position = (candle.close - candle.low) / candle_range if candle_range > 0 else 0.5
 
         feature = {
             "return_1": returns[index],
@@ -129,6 +178,12 @@ def compute_features(candles: list[Candle]) -> list[dict[str, float] | None]:
             "rsi_previous": rsi_previous,
             "atr": atr_values[index],
             "atr_pct": atr_values[index] / candle.close,
+            "adx": adx_values[index],
+            "plus_di": plus_di_values[index],
+            "minus_di": minus_di_values[index],
+            "volume_ratio": volume_ratio,
+            "close_position": close_position,
+            "body_atr_ratio": abs(candle.close - candle.open) / max(atr_values[index], 1e-12),
             "bb_mid": band_mid,
             "bb_upper": band_mid + band_width,
             "bb_lower": band_mid - band_width,

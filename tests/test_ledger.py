@@ -38,6 +38,8 @@ class PaperLedgerTests(unittest.TestCase):
         self.ledger.record(signal, {"return_1": 0.01}, dataset_id="dataset-abc")
         saved = self.ledger.get(signal.signal_id)
         self.assertEqual(saved["dataset_id"], "dataset-abc")
+        self.assertEqual(saved["entry_time"], signal.generated_at.isoformat())
+        self.assertTrue(self.ledger.has_signal_for_time("EUR/USD", "ml_consensus", "dataset-abc", signal.generated_at))
 
         result = self.ledger.resolve(signal.signal_id, 1.11)
         self.assertEqual(result["outcome"], "WIN")

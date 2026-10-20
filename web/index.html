@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#050505">
   <title>Dashboard — Orbix Signal Lab</title>
-  <link rel="stylesheet" href="/static/styles.css?v=9">
+  <link rel="stylesheet" href="/static/styles.css?v=10">
 </head>
 <body>
   <div class="noise" aria-hidden="true"></div>
@@ -62,7 +62,7 @@
 
   <section class="notice shell" id="feedNotice" role="status">
     <span class="notice-icon">i</span>
-    <div id="feedNoticeText"><strong>Synthetic demo prices are active.</strong> No live FX feed or Quotex connection is installed. Signals and test results are not real-market results.</div>
+    <div id="feedNoticeText"><strong>Synthetic demo prices are active.</strong> No live FX feed is configured or connected, and no Quotex connection is present. Signals and test results are not real-market results.</div>
     <button class="notice-dismiss" id="dismissNotice" aria-label="Dismiss notice">×</button>
   </section>
 
@@ -125,7 +125,7 @@
 
       <section class="metrics-grid" aria-label="Research status">
         <article class="metric-card"><span class="metric-kicker">DATA WINDOW</span><strong id="candleCount">—</strong><small>completed M1 candles</small><span class="metric-mark">01</span></article>
-        <article class="metric-card"><span class="metric-kicker">ACTIVE PROTOTYPES</span><strong>04</strong><small>signal methods ready to test</small><span class="metric-mark">02</span></article>
+        <article class="metric-card"><span class="metric-kicker">ACTIVE PROTOTYPES</span><strong>05</strong><small>signal methods ready to test</small><span class="metric-mark">02</span></article>
         <article class="metric-card"><span class="metric-kicker">RESEARCH CANDIDATES</span><strong>30</strong><small>ideas catalogued, not all coded</small><span class="metric-mark">03</span></article>
         <article class="metric-card"><span class="metric-kicker">TRADE EXECUTION</span><strong>OFF</strong><small>signals only · no broker orders</small><span class="metric-mark">04</span></article>
       </section>
@@ -149,26 +149,35 @@
             <span class="mode-tag">PAPER</span>
           </div>
           <label class="field-label" for="strategySelect">Signal method</label>
-          <select id="strategySelect" class="select-control full-width"><option value="ml_consensus">Orbix ML + trend agreement</option></select>
+          <select id="strategySelect" class="select-control full-width"><option value="orbix_confluence">Orbix Confluence Gate</option><option value="ml_consensus">Orbix ML + trend agreement</option></select>
           <div class="signal-result" id="signalResult">
             <div class="signal-glyph" id="signalGlyph">◌</div>
-            <div class="signal-copy"><span class="muted-label">CURRENT READ</span><strong id="signalSide">READY</strong><span id="signalReason">Generate a signal to see the result.</span></div>
+            <div class="signal-copy"><span class="muted-label">CURRENT READ</span><span class="signal-headline" id="signalHeadline">ORAC V1 · WAITING</span><strong id="signalSide">READY</strong><span id="signalReason">Generate a signal to see the result.</span></div>
           </div>
           <div class="signal-details">
             <div><span>ENTRY TIME</span><strong id="entryTime">—</strong></div>
-            <div><span>LEAD TIME</span><strong id="signalLeadTime">1 minute</strong></div>
-            <div><span>PREDICTION / EXPIRY</span><strong id="expiryTime">1 minute later</strong></div>
-            <div><span>MODEL P(UP)</span><strong id="modelScore">—</strong></div>
+            <div><span>GENERATED AT</span><strong id="generatedTime">—</strong></div>
+            <div><span>PREDICTION / EXPIRY</span><strong id="expiryTime">—</strong></div>
+            <div><span>MODEL / RULE</span><strong id="modelScore">—</strong></div>
+          </div>
+          <div class="automation-panel" aria-live="polite">
+            <div class="automation-copy"><span>AUTOMATIC M1 SIGNALS</span><strong id="autoSignalState">WAITING FOR PROVIDERS</strong><small id="autoSignalDetail">Requires server-configured market and event-calendar providers.</small></div>
+            <button class="button button-secondary notification-button" id="enableNotifications" type="button">ENABLE ALERTS</button>
+          </div>
+          <div class="news-panel" aria-live="polite">
+            <div class="news-panel-heading"><span>HIGH-IMPACT NEWS GUARD</span><strong id="newsGuardState">UNKNOWN</strong></div>
+            <p id="newsGuardDetail">No fresh event calendar is connected; automatic signals remain paused.</p>
+            <div id="upcomingEvents" class="upcoming-events"></div>
           </div>
           <button class="button button-primary generate-button" id="generateButton"><span>GENERATE SIGNAL</span><span class="button-arrow">↗</span></button>
-          <p class="micro-copy">Model P(up) is a raw, uncalibrated estimate—not a reliable probability or guarantee. “NO SIGNAL” is a valid result.</p>
+          <p class="micro-copy">The Orbix Confluence Gate is a strict rule set, not a sureshot. Model scores are uncalibrated. News events trigger abstention, not a guessed direction.</p>
         </article>
         <aside class="panel engine-notes">
           <div class="eyebrow small-eyebrow">HOW TO READ IT</div><h2>Signal, not autopilot.</h2>
-          <p class="panel-intro">Every signal uses the latest completed M1 candle. Its entry timestamp is set at the next minute boundary, before the target candle resolves.</p>
-          <div class="note-step"><span>01</span><p><strong>Entry time</strong><br>The next minute boundary after the latest completed candle.</p></div>
-          <div class="note-step"><span>02</span><p><strong>One-minute lead</strong><br>The signal is generated at entry time, one minute before the default prediction expiry.</p></div>
-          <div class="note-step"><span>03</span><p><strong>Prediction / expiry</strong><br>The target outcome is evaluated one minute later for the default M1 horizon.</p></div>
+          <p class="panel-intro">The engine only uses closed M1 candles. Times are displayed in your browser’s local timezone; API timestamps remain UTC. Provider-late signals are skipped rather than backdated.</p>
+          <div class="note-step"><span>01</span><p><strong>Entry time</strong><br>Next M1 boundary after the latest completed candle. Automated entries more than 10 seconds late are discarded.</p></div>
+          <div class="note-step"><span>02</span><p><strong>Generated at</strong><br>Actual server generation time; data-feed latency is shown in the lead to expiry.</p></div>
+          <div class="note-step"><span>03</span><p><strong>Prediction / expiry</strong><br>Exactly one M1 candle after entry for the default horizon. The outcome is scored only after its close.</p></div>
           <a class="text-button inline-link" href="#dashboard" data-route="dashboard">CHANGE PAIR ON DASHBOARD ↗</a>
         </aside>
       </div>
@@ -241,7 +250,7 @@
             <p id="learningNote">Imported-data outcomes update the model only after a confirmed expiry price or matching completed candle arrives. Demo data never trains it.</p>
             <small>Append completed M1 bars through <code>POST /api/candles/append</code> to auto-resolve matching expired paper signals.</small>
           </div>
-          <div class="guide-warning"><strong>No provider feed yet</strong><span>The Connections form does not fetch prices. Automatic expiry updates happen only when new candles are appended to an imported dataset.</span></div>
+          <div class="guide-warning"><strong>Automatic feed is optional</strong><span>Configure the server-side Twelve Data key in <code>.env</code>. Orbix refreshes completed M1 bars every 60 seconds and event data every 15 minutes; it will not overwrite an active manual CSV unless you explicitly sync the provider.</span></div>
           <a class="text-button inline-link" href="#dashboard" data-route="dashboard">SELECT PAIR ON DASHBOARD ↗</a>
         </aside>
       </div>
@@ -249,30 +258,38 @@
 
     <section class="page-view" id="page-connections" data-page="connections" aria-labelledby="connections-title" hidden>
       <header class="page-heading">
-        <div><div class="eyebrow"><span class="eyebrow-line"></span> PROVIDER SETUP</div><h1 id="connections-title">Data connections</h1><p>Enter a provider endpoint and up to 20 API keys. Connection status stays visible above every page.</p></div>
+        <div><div class="eyebrow"><span class="eyebrow-line"></span> PROVIDER SETUP</div><h1 id="connections-title">Data connections</h1><p>Live adapters run server-side. Configure credentials in the server environment; the browser never receives provider secrets.</p></div>
         <div class="blackhole-mini" aria-hidden="true"><i class="mini-ring ring-one"></i><i class="mini-ring ring-two"></i><b></b></div>
       </header>
       <div class="connection-layout">
         <article class="panel provider-form-panel">
-          <div class="panel-heading"><div><div class="eyebrow small-eyebrow">SESSION CONFIGURATION</div><h2>Provider details</h2></div><span class="mode-tag">KEYS NOT SENT</span></div>
-          <label class="field-label" for="providerName">Data provider name</label>
+          <div class="panel-heading"><div><div class="eyebrow small-eyebrow">LOCAL REFERENCE ONLY</div><h2>Provider notes</h2></div><span class="mode-tag">NOT CONNECTED</span></div>
+          <p class="panel-intro">These browser-only fields are not used by Orbix’s built-in integrations. Use the server environment variables listed in README to connect Twelve Data and Finnhub; never paste production secrets here.</p>
+          <label class="field-label" for="providerName">Provider note</label>
           <input class="provider-input" id="providerName" type="text" placeholder="e.g. Your FX data provider" autocomplete="off" maxlength="80">
-          <label class="field-label" for="providerApiUrl">Provider API base URL</label>
+          <label class="field-label" for="providerApiUrl">Endpoint note · not called</label>
           <input class="provider-input" id="providerApiUrl" type="url" placeholder="https://api.provider.example/v1" autocomplete="url" spellcheck="false">
-          <div class="key-list-heading"><div><span class="field-label">API keys</span><span class="key-count" id="providerKeyCount">0 / 20 active</span></div><button class="button button-secondary add-key-button" id="addKeyButton" type="button">ADD KEY <span>＋</span></button></div>
+          <div class="key-list-heading"><div><span class="field-label">Local key notes · never submitted</span><span class="key-count" id="providerKeyCount">0 / 20 active</span></div><button class="button button-secondary add-key-button" id="addKeyButton" type="button">ADD KEY <span>＋</span></button></div>
           <div class="key-slots" id="keySlots" aria-label="API key inputs"></div>
           <div class="provider-actions">
-            <button class="button button-primary" id="saveProviderButton" type="button">KEEP FOR THIS SESSION <span class="button-arrow">↗</span></button>
+            <button class="button button-primary" id="saveProviderButton" type="button">SAVE LOCAL NOTES <span class="button-arrow">↗</span></button>
             <button class="text-button" id="clearProviderButton" type="button">CLEAR CONFIG</button>
           </div>
-          <p class="micro-copy" id="providerFormStatus" role="status">Keys stay in browser memory only. They are not saved to disk or sent to Orbix’s server.</p>
+          <p class="micro-copy" id="providerFormStatus" role="status">Local notes stay in this tab only. They never connect to a provider or Orbix’s server.</p>
         </article>
         <aside class="panel provider-status-panel">
-          <div class="eyebrow small-eyebrow">CONNECTION STATUS</div>
-          <div class="provider-state-card"><span class="connection-indicator" id="providerStatusIndicator" aria-hidden="true"></span><div><span class="muted-label">CURRENT STATE</span><strong id="providerPageState">NOT CONNECTED</strong></div></div>
-          <p class="panel-intro" id="providerPageMessage">No provider is configured. Synthetic demo data remains active.</p>
-          <div class="provider-status-notice"><strong>A live adapter is still needed</strong><span>The provider has not been specified, so Orbix cannot safely test authentication or fetch prices yet. Saving these fields does not connect a data feed.</span></div>
-          <div class="provider-security"><span class="security-symbol">◇</span><p><strong>Session-only keys</strong><br>Values are kept in this page’s memory and cleared when it reloads. No localStorage, database, or outbound request is used.</p></div>
+          <div class="eyebrow small-eyebrow">SERVER-SIDE AUTOMATION</div>
+          <div class="provider-state-card"><span class="connection-indicator" id="providerStatusIndicator" aria-hidden="true"></span><div><span class="muted-label">AUTO SIGNAL STATE</span><strong id="providerPageState">WAITING FOR PROVIDERS</strong></div></div>
+          <p class="panel-intro" id="providerPageMessage">Add provider credentials to the server environment, then sync the feed here.</p>
+          <div class="server-provider-list">
+            <div><span>MARKET DATA · TWELVE DATA</span><strong id="marketFeedState">NOT CONFIGURED</strong><small id="marketFeedMessage">Set ORBIX_TWELVE_DATA_API_KEY.</small></div>
+            <div><span>ECONOMIC CALENDAR · FINNHUB</span><strong id="calendarFeedState">NOT CONFIGURED</strong><small id="calendarFeedMessage">Set ORBIX_FINNHUB_API_KEY; calendar access may require a paid plan.</small></div>
+          </div>
+          <div class="server-provider-actions">
+            <button class="button button-primary" id="syncLiveFeedButton" type="button">SYNC / ACTIVATE LIVE FEED <span class="button-arrow">↗</span></button>
+            <button class="button button-secondary" id="refreshCalendarButton" type="button"><span>REFRESH EVENT CALENDAR</span><span class="button-arrow">↻</span></button>
+          </div>
+          <p class="provider-security-note"><strong>Safe defaults:</strong> provider data is appended only to its own active dataset; manual CSV history is never silently overwritten. High-impact events pause automatic signals instead of guessing a news direction.</p>
         </aside>
       </div>
     </section>
@@ -287,7 +304,7 @@
         <div class="history-table-wrap">
           <table class="history-table"><thead><tr><th>PAIR</th><th>METHOD</th><th>READ</th><th>ENTRY TIME</th><th>PREDICTION TIME</th><th>STATUS</th><th>PAPER EXIT PRICE</th></tr></thead><tbody id="historyRows"><tr><td colspan="7" class="empty-row">No generated signals yet.</td></tr></tbody></table>
         </div>
-        <p class="micro-copy">Imported-data signals update the online model once, after a completed expiry candle arrives or you enter a confirmed expiry price. Ties and synthetic demo outcomes do not change model weights.</p>
+        <p class="micro-copy">Confirmed imported-data losses feed the online model once after expiry. This can improve later forecasts but cannot guarantee the same error will never recur; ties and synthetic data are excluded.</p>
         <p class="micro-copy" id="paperLogStatus" role="status"></p>
       </article>
       <div class="page-footnote"><span class="footnote-mark">i</span><p>Synthetic demo outcomes are marked DEMO ONLY and never train the model. Imported outcomes stay tied to their persistent dataset stream and are learned at most once.</p></div>
@@ -295,7 +312,7 @@
 
     <section class="page-view" id="page-strategy-lab" data-page="strategy-lab" aria-labelledby="strategy-title" hidden>
       <header class="page-heading">
-        <div><div class="eyebrow"><span class="eyebrow-line"></span> RESEARCH QUEUE</div><h1 id="strategy-title">Strategy lab <span class="count-badge">30</span></h1><p>Four transparent prototypes can be run now. The rest are ideas to implement and validate—not claims of profitability.</p></div>
+        <div><div class="eyebrow"><span class="eyebrow-line"></span> RESEARCH QUEUE</div><h1 id="strategy-title">Strategy lab <span class="count-badge">30</span></h1><p>Five transparent prototypes can be run now, including Orbix’s original confluence rule set. The rest are research ideas—not claims of profitability.</p></div>
         <div class="blackhole-mini" aria-hidden="true"><i class="mini-ring ring-one"></i><i class="mini-ring ring-two"></i><b></b></div>
       </header>
       <article class="panel lab-panel">
@@ -307,11 +324,12 @@
     </section>
   </main>
 
+  <div class="notification-toast" id="notificationToast" role="status" aria-live="polite" hidden></div>
   <footer class="footer shell">
     <div class="footer-brand"><span class="footer-mark">O</span><span>ORBIX <small>RESEARCH BUILD 0.1</small></span></div>
-    <p>Signal research only. Not financial advice. No live data, Quotex login, or real trades.</p>
+    <p>Signal research only. Live feeds are optional/configured on the server. No Quotex login or real trades.</p>
     <span class="footer-right">BUILT FOR BETTER QUESTIONS</span>
   </footer>
-  <script src="/static/app.js?v=9" defer></script>
+  <script src="/static/app.js?v=10" defer></script>
 </body>
 </html>

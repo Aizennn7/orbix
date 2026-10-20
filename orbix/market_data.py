@@ -40,7 +40,7 @@ def parse_candles_csv(text: str, minimum: int = 30) -> list[Candle]:
     columns = {name.strip().lower() for name in reader.fieldnames if name}
     if not {"open", "high", "low", "close"}.issubset(columns):
         raise ValueError("CSV needs open, high, low, and close columns")
-    if not ({"timestamp", "time", "date"} & columns):
+    if not ({"timestamp", "datetime", "time", "date"} & columns):
         raise ValueError("CSV needs a timestamp, time, or date column")
 
     rows: list[Candle] = []

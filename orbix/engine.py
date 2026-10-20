@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 import uuid
 
-from .domain import Candle, Signal
+from .domain import Candle, Signal, parse_datetime
 from .features import compute_features
 from .model import OnlineLogisticModel, train_from_candles
 from .strategies import decide, EXECUTABLE_STRATEGIES
@@ -20,6 +20,8 @@ class PredictionEngine:
         source: str = "SYNTHETIC DEMO",
         horizon: int = 1,
         model: OnlineLogisticModel | None = None,
+        generated_at: datetime | None = None,
+        is_live: bool = False,
     ) -> tuple[Signal, OnlineLogisticModel | None, dict[str, float] | None]:
         if len(candles) < 40:
             raise ValueError("At least 40 completed candles are required")
@@ -48,16 +50,19 @@ class PredictionEngine:
         # one configured horizon later (one minute later for the default M1).
         entry_time = latest.timestamp + timedelta(minutes=1)
         prediction_time = entry_time + timedelta(minutes=horizon)
+        actual_generated_at = parse_datetime(generated_at) if generated_at is not None else entry_time
         signal = Signal(
             signal_id=uuid.uuid4().hex,
             pair=pair,
             strategy=strategy_id,
             side=decision.side,
             entry_price=latest.close,
-            generated_at=entry_time,
+            generated_at=actual_generated_at,
             expires_at=prediction_time,
             probability_up=decision.probability_up,
             source=source,
             reason=decision.reason,
+            entry_time=entry_time,
+            is_live=is_live,
         )
         return signal, fitted_model, current_features

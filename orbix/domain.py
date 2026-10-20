@@ -57,7 +57,7 @@ class Candle:
 
     @classmethod
     def from_mapping(cls, row: dict[str, Any]) -> "Candle":
-        timestamp = row.get("timestamp", row.get("time", row.get("date")))
+        timestamp = row.get("timestamp", row.get("datetime", row.get("time", row.get("date"))))
         if timestamp is None:
             raise ValueError("Each candle needs a timestamp column")
         try:
@@ -102,11 +102,8 @@ class Signal:
     probability_up: float | None
     source: str
     reason: str
-
-    @property
-    def entry_time(self) -> datetime:
-        """The signal becomes actionable at the next candle boundary."""
-        return self.generated_at
+    entry_time: datetime | None = None
+    is_live: bool = False
 
     @property
     def prediction_time(self) -> datetime:
@@ -122,13 +119,13 @@ class Signal:
             # Keep the price for paper settlement/model labels, while the UI
             # emphasizes time-based entry and prediction timestamps.
             "entry_price": self.entry_price,
-            "entry_time": format_datetime(self.entry_time),
+            "entry_time": format_datetime(self.entry_time or self.generated_at),
             "generated_at": format_datetime(self.generated_at),
             "prediction_time": format_datetime(self.prediction_time),
             "expires_at": format_datetime(self.expires_at),
-            "horizon": max(1, int((self.expires_at - self.generated_at).total_seconds() // 60)),
+            "horizon": max(1, int((self.expires_at - (self.entry_time or self.generated_at)).total_seconds() // 60)),
             "probability_up": self.probability_up,
             "source": self.source,
             "reason": self.reason,
-            "is_live": False,
+            "is_live": self.is_live,
         }

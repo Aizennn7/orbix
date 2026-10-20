@@ -36,7 +36,8 @@ def run_walk_forward_backtest(
     rows = compute_features(candles)
     test_start = max(60, int(len(candles) * 0.60))
     model: OnlineLogisticModel | None = None
-    if strategy_id == "ml_consensus":
+    uses_learned_model = strategy_id in {"ml_consensus", "orbix_confluence"}
+    if uses_learned_model:
         model = train_from_candles(candles, rows, horizon=horizon, end_index=test_start - 1)
 
     wins = losses = ties = 0

@@ -193,6 +193,16 @@ h2 { font-size: 18px; font-weight: 530; letter-spacing: -.035em; margin: 0; }
 .provider-state-card > div { display: grid; gap: 6px; min-width: 0; }
 .provider-state-card strong { font-size: 11px; line-height: 1.4; letter-spacing: .08em; }
 .provider-status-panel .panel-intro { margin: 12px 0; }
+.server-provider-list { display: grid; gap: 8px; margin: 14px 0; }
+.server-provider-list > div { display: grid; gap: 5px; padding: 11px; border: 1px solid var(--line); border-radius: 7px; background: rgba(255,255,255,.025); }
+.server-provider-list span { color: var(--dim); font-size: 7px; letter-spacing: .13em; }
+.server-provider-list strong { font-size: 9px; font-weight: 600; }
+.server-provider-list small { color: var(--muted); font-size: 8px; line-height: 1.5; }
+.server-provider-actions { display: grid; gap: 8px; }
+.server-provider-actions .button { width: 100%; }
+.server-provider-actions .button:disabled { opacity: .4; cursor: not-allowed; }
+.provider-security-note { color: var(--dim); font-size: 8px; line-height: 1.7; margin: 12px 0 0; }
+.provider-security-note strong { color: var(--muted); }
 .provider-status-notice { display: grid; gap: 6px; padding: 13px; border: 1px solid var(--line); border-radius: 8px; background: rgba(255,255,255,.035); }
 .provider-status-notice strong { font-size: 9px; letter-spacing: .08em; }
 .provider-status-notice span { color: var(--muted); font-size: 9px; line-height: 1.65; }
@@ -214,7 +224,24 @@ h2 { font-size: 18px; font-weight: 530; letter-spacing: -.035em; margin: 0; }
 .signal-details > div:last-child { border-right: 0; }
 .signal-details span, .result-stat span { color: var(--dim); font-size: 8px; letter-spacing: .13em; }
 .signal-details strong { font-size: 10px; font-weight: 530; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-.generate-button { width: 100%; margin-top: auto; }
+.signal-headline { color: var(--muted); font-size: 8px; letter-spacing: .12em; text-transform: uppercase; }
+.automation-panel { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: rgba(255,255,255,.025); }
+.automation-copy { display: grid; gap: 5px; min-width: 0; }
+.automation-copy > span, .news-panel-heading > span { color: var(--dim); font-size: 7px; letter-spacing: .14em; }
+.automation-copy strong { font-size: 9px; font-weight: 600; letter-spacing: .06em; }
+.automation-copy small { color: var(--muted); font-size: 8px; line-height: 1.5; }
+.notification-button { flex: 0 0 auto; padding: 10px 11px; font-size: 7px; }
+.news-panel { margin-top: 9px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: rgba(0,0,0,.16); }
+.news-panel-heading { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.news-panel-heading strong { font-size: 8px; font-weight: 600; letter-spacing: .1em; }
+.news-panel > p { color: var(--muted); font-size: 8px; line-height: 1.5; margin: 8px 0 0; }
+.upcoming-events { display: grid; gap: 5px; margin-top: 8px; }
+.upcoming-events > small { color: var(--dim); font-size: 7px; }
+.upcoming-event-row { display: flex; justify-content: space-between; gap: 10px; padding-top: 5px; border-top: 1px solid rgba(255,255,255,.07); }
+.upcoming-event-row strong, .upcoming-event-row span { color: var(--muted); font-size: 7px; font-weight: 450; }
+.upcoming-event-row span { white-space: nowrap; }
+.notification-toast { position: fixed; z-index: 40; right: 20px; bottom: 20px; max-width: min(440px, calc(100vw - 40px)); padding: 13px 16px; border: 1px solid var(--line-bright); border-radius: 8px; background: rgba(9,9,9,.96); box-shadow: 0 14px 44px rgba(0,0,0,.45); color: var(--ink); font-size: 10px; line-height: 1.5; }
+.generate-button { width: 100%; margin-top: 12px; }
 .engine-notes { padding: 24px; }
 .engine-notes h2, .data-guide h2 { font-size: 22px; font-weight: 500; margin: 10px 0; }
 .panel-intro { color: var(--muted); font-size: 10px; line-height: 1.7; margin: 12px 0 17px; max-width: 650px; }
@@ -375,6 +402,8 @@ h2 { font-size: 18px; font-weight: 530; letter-spacing: -.035em; margin: 0; }
   .route-card-grid { grid-template-columns: 1fr; gap: 8px; }
   .route-card { min-height: 82px; }
   .signal-details { grid-template-columns: repeat(2, 1fr); gap: 12px 0; }
+  .automation-panel { align-items: stretch; flex-direction: column; }
+  .notification-button { width: 100%; }
   .signal-details > div { display: grid; grid-template-columns: 1fr auto; align-items: center; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 0 8px 8px; }
   .signal-details > div:first-child { padding-left: 0; }
   .signal-details > div:nth-child(even) { border-right: 0; }

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from dataclasses import replace
 from hashlib import sha256
 from pathlib import Path
 import re
@@ -181,7 +182,16 @@ class Runtime:
         self.models[pair] = model
         return model
 
-    def generate_signal(self, pair: str, strategy_id: str = "ml_consensus", horizon: int = 1) -> dict:
+    def generate_signal(
+        self,
+        pair: str,
+        strategy_id: str = "ml_consensus",
+        horizon: int = 1,
+        *,
+        generated_at: datetime | None = None,
+        is_live: bool = False,
+        safety_filter_reason: str | None = None,
+    ) -> dict:
         pair = pair.upper().strip()
         with self.lock:
             if self.source == "SYNTHETIC DEMO":
@@ -198,7 +208,7 @@ class Runtime:
                 except ValueError:
                     if strategy_id == "ml_consensus":
                         raise
-            signal_model = learning_model if strategy_id == "ml_consensus" else None
+            signal_model = learning_model if strategy_id in {"ml_consensus", "orbix_confluence"} else None
             signal, _, features = self.engine.generate_signal(
                 candles=self.candles,
                 pair=pair,
@@ -206,7 +216,11 @@ class Runtime:
                 source=self.source,
                 horizon=horizon,
                 model=signal_model,
+                generated_at=generated_at,
+                is_live=is_live,
             )
+            if safety_filter_reason:
+                signal = replace(signal, side="NO SIGNAL", reason=safety_filter_reason)
             if learning_model is not None and self.source == "IMPORTED CSV":
                 learning_model.save(self.model_path(pair))
             self.ledger.record(signal, features, dataset_id=self.dataset_id())

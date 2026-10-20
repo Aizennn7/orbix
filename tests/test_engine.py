@@ -8,7 +8,7 @@ from orbix.engine import PredictionEngine
 from orbix.features import FEATURE_NAMES, compute_features
 from orbix.market_data import build_demo_candles, parse_candles_csv, validate_candles
 from orbix.model import OnlineLogisticModel, build_training_samples, train_from_candles
-from orbix.strategies import STRATEGY_CATALOG, strategy_catalog_payload
+from orbix.strategies import STRATEGY_CATALOG, decide, strategy_catalog_payload
 
 
 class OrbixEngineTests(unittest.TestCase):
@@ -28,6 +28,7 @@ class OrbixEngineTests(unittest.TestCase):
         latest = rows[-1]
         self.assertIsNotNone(latest)
         self.assertTrue(all(name in latest for name in FEATURE_NAMES))
+        self.assertTrue({"adx", "plus_di", "minus_di"}.issubset(latest))
         self.assertTrue(all(value == value for value in latest.values()))
 
     def test_csv_import(self) -> None:
@@ -64,6 +65,23 @@ class OrbixEngineTests(unittest.TestCase):
         self.assertEqual(payload["horizon"], 1)
         self.assertIsNotNone(model)
 
+    def test_live_generation_time_is_distinct_from_entry_and_expiry(self) -> None:
+        generated_at = datetime(2026, 10, 20, 12, 0, 5, tzinfo=timezone.utc)
+        signal, _, _ = PredictionEngine().generate_signal(
+            self.candles,
+            "EUR/USD",
+            "orbix_confluence",
+            "IMPORTED CSV",
+            horizon=1,
+            generated_at=generated_at,
+            is_live=True,
+        )
+        self.assertTrue(signal.to_dict()["is_live"])
+        self.assertEqual(signal.generated_at, generated_at)
+        self.assertEqual(signal.entry_time, self.candles[-1].timestamp + timedelta(minutes=1))
+        self.assertEqual(signal.expires_at - signal.entry_time, timedelta(minutes=1))
+        self.assertEqual(signal.to_dict()["entry_time"], signal.entry_time.isoformat().replace("+00:00", "Z"))
+
     def test_walk_forward_backtest_returns_metrics(self) -> None:
         result = run_walk_forward_backtest(self.candles, strategy_id="trend_pullback", payout=0.8)
         self.assertEqual(result["strategy"], "trend_pullback")
@@ -76,12 +94,44 @@ class OrbixEngineTests(unittest.TestCase):
         if result["decisive_trades"]:
             self.assertLessEqual(result["win_rate_ci95"]["lower"], result["win_rate"])
             self.assertLessEqual(result["win_rate"], result["win_rate_ci95"]["upper"])
+        confluence = run_walk_forward_backtest(self.candles, strategy_id="orbix_confluence", payout=0.8)
+        self.assertEqual(confluence["strategy"], "orbix_confluence")
+        self.assertGreater(confluence["test_candles"], 0)
+
+    def test_orbix_confluence_requires_five_of_six_checks_and_trend_adx(self) -> None:
+        candle = self.candles[-1]
+        close = candle.close
+        features = {
+            "ema_fast": close * 0.9999,
+            "ema_slow": close * 0.9995,
+            "rsi": 60.0,
+            "rsi_previous": 58.0,
+            "atr_pct": 0.0005,
+            "return_1": 0.0001,
+            "return_3": 0.0002,
+            "adx": 25.0,
+            "plus_di": 30.0,
+            "minus_di": 15.0,
+            "body_atr_ratio": 0.5,
+            "close_position": 0.8,
+            "prior_high_20": close * 1.001,
+            "prior_low_20": close * 0.998,
+        }
+        decision = decide("orbix_confluence", candle, close * 0.999, features, None)
+        self.assertEqual(decision.side, "BUY")
+        self.assertIn("5/6", decision.reason)
+        veto = decide("orbix_confluence", candle, close * 0.999, features, 0.45)
+        self.assertEqual(veto.side, "NO SIGNAL")
+        self.assertIn("model vetoed", veto.reason)
+        features["adx"] = 12.0
+        abstain = decide("orbix_confluence", candle, close * 0.999, features, None)
+        self.assertEqual(abstain.side, "NO SIGNAL")
 
     def test_strategy_catalog_has_30_candidates(self) -> None:
         self.assertEqual(len(STRATEGY_CATALOG), 30)
         payload = strategy_catalog_payload()
         self.assertEqual(len(payload["candidates"]), 30)
-        self.assertEqual(len(payload["executable"]), 4)
+        self.assertEqual(len(payload["executable"]), 5)
         statuses = {item["name"]: item["status"] for item in payload["candidates"]}
         self.assertEqual(statuses["Trend-filtered RSI pullback"], "prototype approximation")
         self.assertEqual(statuses["Bollinger bounce"], "prototype approximation")

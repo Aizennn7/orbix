@@ -7,7 +7,7 @@ const ROUTES = {
   paper: "Paper log",
   "strategy-lab": "Strategy lab",
 };
-const state = { market: null, strategies: null, lastSignal: null, route: "dashboard", providerKeys: [""], providerConfig: null, lastBacktestKey: null, backtestTimer: null, backtestRunning: false };
+const state = { market: null, strategies: null, lastSignal: null, route: "dashboard", providerKeys: [""], providerConfig: null, lastBacktestKey: null, backtestTimer: null, backtestRunning: false, automation: null, lastAutoSignalId: null, lastAutoCandleTimestamp: null, notificationsEnabled: false, toastTimer: null };
 const $ = (selector) => document.querySelector(selector);
 
 async function api(path, options = {}) {
@@ -50,6 +50,140 @@ function compactTime(value) {
 function showError(message) {
   const notice = $("#importStatus");
   if (notice) notice.textContent = message;
+}
+
+function signalLeadLabel(generatedAt, predictionAt) {
+  const difference = Math.round((Date.parse(predictionAt) - Date.parse(generatedAt)) / 1000);
+  if (!Number.isFinite(difference)) return "— lead";
+  const seconds = Math.abs(difference);
+  const duration = seconds >= 60 ? `${Math.floor(seconds / 60)}m ${seconds % 60}s` : `${seconds}s`;
+  return difference < 0 ? `expired ${duration} ago` : `${duration} lead`;
+}
+
+function showNotificationToast(message) {
+  const toast = $("#notificationToast");
+  if (!toast) return;
+  toast.textContent = message;
+  toast.hidden = false;
+  window.clearTimeout(state.toastTimer);
+  state.toastTimer = window.setTimeout(() => { toast.hidden = true; }, 9000);
+}
+
+function updateNotificationButton() {
+  const button = $("#enableNotifications");
+  if (!button) return;
+  if (!("Notification" in window)) {
+    button.textContent = "ALERTS UNSUPPORTED";
+    button.disabled = true;
+  } else if (Notification.permission === "denied") {
+    button.textContent = "ALERTS BLOCKED IN BROWSER";
+    button.disabled = true;
+  } else {
+    button.disabled = false;
+    button.textContent = state.notificationsEnabled ? "ALERTS ON · CLICK TO PAUSE" : "ENABLE ALERTS";
+  }
+}
+
+function renderUpcomingEvents(guard) {
+  const container = $("#upcomingEvents");
+  if (!container) return;
+  container.replaceChildren();
+  const events = guard?.events || [];
+  if (!events.length) {
+    const empty = document.createElement("small");
+    empty.textContent = guard?.active_event ? "An active event is inside the blackout window." : "No relevant high-impact events in the next 24 hours.";
+    container.append(empty);
+    return;
+  }
+  events.slice(0, 4).forEach((event) => {
+    const row = document.createElement("div");
+    row.className = "upcoming-event-row";
+    const name = document.createElement("strong");
+    name.textContent = `${event.country || "—"} · ${event.event || "Economic release"}`;
+    const time = document.createElement("span");
+    time.textContent = compactTime(event.time);
+    row.append(name, time);
+    container.append(row);
+  });
+}
+
+function notifyForAutomaticSignal(signal) {
+  if (!signal || !signal.signal_id) return;
+  renderSignal(signal);
+  refreshHistory();
+  if (signal.side === "NO SIGNAL") return;
+  const entry = compactTime(signal.entry_time || signal.generated_at);
+  const expiry = compactTime(signal.prediction_time || signal.expires_at);
+  const headline = signal.heading || `Orbix · ${signal.side}`;
+  showNotificationToast(`${headline} · ${signal.pair} · entry ${entry} · prediction ${expiry}`);
+  if (state.notificationsEnabled && "Notification" in window && Notification.permission === "granted") {
+    const notification = new Notification(headline, {
+      body: `${signal.pair} · entry ${entry} · prediction ${expiry}. ${signal.reason || "Research signal only."}`,
+      tag: `orbix-${signal.signal_id}`,
+    });
+    notification.onclick = () => { window.focus(); window.location.hash = "#engine"; notification.close(); };
+  }
+}
+
+async function refreshAutomationStatus() {
+  if (state.automationPolling) return;
+  state.automationPolling = true;
+  try {
+    const data = await api("/api/automation/status");
+    state.automation = data;
+    const market = data.market || {};
+    const calendar = data.calendar || {};
+    const guard = calendar.guard || { status: "UNAVAILABLE", message: "Calendar unavailable.", events: [] };
+    const active = Boolean(data.automatic_signals_active);
+    const connectionText = active ? "AUTOMATION READY" : market.connected && !market.data_fresh ? "MARKET DATA STALE · SIGNALS PAUSED" : market.connected ? "MARKET CONNECTED · SIGNALS PAUSED" : market.configured ? "MARKET FEED WAITING" : "SERVER FEED NOT CONFIGURED";
+    $("#connectionStatus").textContent = connectionText;
+    $("#connectionDetail").textContent = `${market.provider || "Market provider"} · ${market.refresh_seconds || 60}s refresh · news: ${guard.status.toLowerCase()}`;
+    $("#connectionIndicator").classList.toggle("is-configured", Boolean(market.configured && market.connected));
+    $("#connectionIndicator").classList.toggle("is-pending", Boolean(market.configured && !market.connected));
+
+    $("#autoSignalState").textContent = active ? "ACTIVE · NEW CLOSED BARS ONLY" : "PAUSED · PROVIDER REQUIREMENTS";
+    $("#autoSignalDetail").textContent = `${data.auto_status} News guard: ${guard.status.toLowerCase()}.`;
+    $("#newsGuardState").textContent = guard.status === "BLACKOUT" ? "NEWS BLACKOUT" : guard.status;
+    $("#newsGuardDetail").textContent = guard.message || "Economic-calendar state unavailable.";
+    renderUpcomingEvents(guard);
+
+    const feedStatus = !market.configured ? "NOT CONFIGURED" : market.last_error ? "FEED ERROR" : market.connected && !market.data_fresh ? "STALE DATA" : market.connected ? "CONNECTED" : market.paused_by_user ? "PAUSED BY USER" : market.active_source === "IMPORTED CSV" && !market.active_dataset_is_provider ? "MANUAL CSV ACTIVE" : "WAITING FOR SYNC";
+    $("#marketFeedState").textContent = feedStatus;
+    $("#marketFeedMessage").textContent = market.last_error || (market.connected
+      ? `Last sync ${market.last_success ? compactTime(market.last_success) : "—"}; latest bar age ${Math.max(0, Math.round(market.latest_bar_age_seconds || 0))}s (limit ${market.max_bar_age_seconds}s); ${market.refresh_seconds}s refresh.`
+      : market.configured ? "Use Sync / Activate Live Feed to select the provider dataset." : "Set ORBIX_TWELVE_DATA_API_KEY on the server.");
+    $("#calendarFeedState").textContent = !calendar.configured ? "NOT CONFIGURED" : calendar.connected ? "CONNECTED" : calendar.last_error ? "CALENDAR ERROR" : "WAITING FOR REFRESH";
+    $("#calendarFeedMessage").textContent = calendar.last_error || (calendar.connected
+      ? `${Number(calendar.event_count || 0)} events cached · refresh ${calendar.last_updated ? compactTime(calendar.last_updated) : "—"} · ${calendar.timezone || "UTC"}.`
+      : calendar.configured ? "Refresh the calendar to enable news-aware automatic signals." : "Set ORBIX_FINNHUB_API_KEY; provider access may require a paid plan.");
+    $("#providerPageState").textContent = active ? "AUTOMATION READY" : "AUTOMATION PAUSED";
+    $("#providerPageMessage").textContent = data.auto_status;
+    $("#providerStatusIndicator").classList.toggle("is-configured", active);
+    $("#providerStatusIndicator").classList.toggle("is-pending", !active && Boolean(market.configured || calendar.configured));
+    $("#syncLiveFeedButton").disabled = !market.configured;
+    $("#refreshCalendarButton").disabled = !calendar.configured;
+
+    const latestCandleTimestamp = market.latest_candle?.timestamp;
+    if (latestCandleTimestamp && state.lastAutoCandleTimestamp && latestCandleTimestamp !== state.lastAutoCandleTimestamp) {
+      await Promise.all([loadMarket(), refreshHistory()]);
+    }
+    if (latestCandleTimestamp) state.lastAutoCandleTimestamp = latestCandleTimestamp;
+
+    const signal = data.latest_auto_signal;
+    if (signal?.signal_id && signal.signal_id !== state.lastAutoSignalId) {
+      const firstPoll = state.lastAutoSignalId === null;
+      state.lastAutoSignalId = signal.signal_id;
+      const signalAge = Date.now() - Date.parse(signal.automation_generated_at || signal.generated_at || "");
+      if (!firstPoll || (Number.isFinite(signalAge) && signalAge >= 0 && signalAge <= 120000)) {
+        notifyForAutomaticSignal(signal);
+      }
+    }
+  } catch (error) {
+    $("#autoSignalState").textContent = "AUTOMATION STATUS UNAVAILABLE";
+    $("#autoSignalDetail").textContent = error.message;
+  } finally {
+    state.automationPolling = false;
+  }
 }
 
 function drawChart(candles) {
@@ -126,16 +260,18 @@ async function loadMarket() {
     $("#dashboardSignalPair").textContent = `${data.pair} · M1`;
     $("#latestPrice").textContent = formatPrice(data.latest?.close, data.pair);
     $("#latestTime").textContent = data.latest ? compactTime(data.latest.timestamp) : "No candle";
-    $("#marketSource").textContent = data.source;
+    $("#marketSource").textContent = data.source_label || data.source;
     const synthetic = data.source === "SYNTHETIC DEMO";
-    $("#sourceBadge").textContent = synthetic ? "SYNTHETIC DEMO" : "CSV HISTORY";
-    $("#feedNoticeText").innerHTML = synthetic
-      ? "<strong>Synthetic demo prices are active.</strong> No live FX feed or Quotex connection is installed. Signals and test results are not real-market results."
-      : "<strong>Imported CSV history is active.</strong> Prices are historical file data, not a live feed. Signals and test results do not predict future performance.";
+    $("#sourceBadge").textContent = data.live_feed_connected ? "LIVE FEED" : synthetic ? "SYNTHETIC DEMO" : "CSV HISTORY";
+    $("#feedNoticeText").innerHTML = data.live_feed_connected
+      ? "<strong>Live M1 feed connected.</strong> Prices come from the configured Twelve Data account and may differ from a broker’s executable quotes. News blackouts and stale-candle checks remain active."
+      : synthetic
+        ? "<strong>Synthetic demo prices are active.</strong> No live FX feed is configured or connected, and no Quotex connection is present. Signals and test results are not real-market results."
+        : "<strong>Imported CSV history is active.</strong> Prices are historical file data, not a live feed. Signals and test results do not predict future performance.";
     $("#candleCount").textContent = data.total_candles.toLocaleString();
     $("#chartRange").textContent = `${data.candles.length} BARS`;
     if (state.route === "dashboard") drawChart(data.candles);
-    if (state.route === "backtest") scheduleAutomaticBacktest();
+    if (data.source === "IMPORTED CSV" || state.route === "backtest") scheduleAutomaticBacktest();
   } catch (error) {
     showError(error.message);
     if (state.market?.source === "IMPORTED CSV") $("#pairSelect").value = state.market.pair;
@@ -218,23 +354,34 @@ function renderSignal(signal) {
   state.lastSignal = signal;
   const side = signal.side || "NO SIGNAL";
   const glyph = side === "BUY" ? "↑" : side === "SELL" ? "↓" : "◌";
+  const entryTime = signal.entry_time || signal.generated_at;
+  const generatedAt = signal.generated_at || entryTime;
+  const predictionTime = signal.prediction_time || signal.expires_at;
+  const strategyName = state.strategies?.executable?.find((item) => item.id === signal.strategy)?.name || signal.strategy || "Orbix";
+  const ruleMatch = String(signal.reason || "").match(/(\d)\/6/);
+  $("#signalHeadline").textContent = signal.heading || `${strategyName} · ${side}`;
   $("#signalSide").textContent = side;
   $("#signalReason").textContent = signal.reason || "No explanation returned.";
-  const entryTime = signal.entry_time || signal.generated_at;
-  const predictionTime = signal.prediction_time || signal.expires_at;
   $("#entryTime").textContent = compactTime(entryTime);
-  $("#signalLeadTime").textContent = `${signal.horizon || 1} minute${(signal.horizon || 1) === 1 ? "" : "s"}`;
-  $("#expiryTime").textContent = `${compactTime(predictionTime)} · ${signal.horizon || 1}m`;
-  $("#modelScore").textContent = signal.probability_up == null ? "—" : `${(signal.probability_up * 100).toFixed(1)}% up`;
+  $("#generatedTime").textContent = compactTime(generatedAt);
+  $("#expiryTime").textContent = `${compactTime(predictionTime)} · ${signalLeadLabel(generatedAt, predictionTime)}`;
+  $("#modelScore").textContent = signal.strategy === "orbix_confluence"
+    ? (ruleMatch ? `${ruleMatch[1]}/6 checks` : "rule-based")
+    : signal.probability_up == null ? "—" : `${(signal.probability_up * 100).toFixed(1)}% up`;
   $("#signalGlyph").textContent = glyph;
   $("#signalResult").dataset.side = side.toLowerCase().replaceAll(" ", "-");
   $("#signalSide").title = signal.signal_id || "";
+  if (signal.news_guard) {
+    $("#newsGuardState").textContent = signal.news_guard.status === "BLACKOUT" ? "NEWS BLACKOUT" : signal.news_guard.status;
+    $("#newsGuardDetail").textContent = signal.news_guard.message || "No event context returned.";
+    renderUpcomingEvents(signal.news_guard);
+  }
 
   $("#dashboardSignalSide").textContent = side;
   $("#dashboardSignalGlyph").textContent = glyph;
   $("#dashboardSignalReason").textContent = signal.reason || "No explanation returned.";
   $("#dashboardSignalPair").textContent = `${signal.pair} · M1`;
-  $("#dashboardSignalTimestamp").textContent = compactTime(signal.entry_time || signal.generated_at);
+  $("#dashboardSignalTimestamp").textContent = compactTime(entryTime);
   refreshHistory();
 }
 
@@ -269,7 +416,7 @@ function currentBacktestKey() {
     $("#pairSelect").value || state.market?.pair || "EUR/USD",
     state.market?.source || "",
     state.market?.dataset_id || "",
-    state.market?.total_candles || 0,
+    Math.floor(Number(state.market?.total_candles || 0) / 50) * 50,
     $("#strategySelect").value,
     payout,
   ].join("|");
@@ -326,6 +473,51 @@ async function runBacktest(force = true) {
   }
 }
 
+async function syncLiveFeed() {
+  const button = $("#syncLiveFeedButton");
+  button.disabled = true;
+  button.querySelector("span:first-child").textContent = "SYNCING…";
+  try {
+    const result = await api("/api/automation/sync", { method: "POST" });
+    showNotificationToast(result.message || `Live feed sync ${result.status}.`);
+    await Promise.all([loadMarket(), refreshStorageSummary(), refreshHistory(), refreshAutomationStatus()]);
+  } catch (error) {
+    $("#marketFeedMessage").textContent = error.message;
+    $("#marketFeedState").textContent = "SYNC FAILED";
+  } finally {
+    button.disabled = !state.automation?.market?.configured;
+    button.querySelector("span:first-child").textContent = "SYNC / ACTIVATE LIVE FEED";
+  }
+}
+
+async function refreshCalendarNow() {
+  const button = $("#refreshCalendarButton");
+  button.disabled = true;
+  button.querySelector("span:first-child").textContent = "REFRESHING…";
+  try {
+    await api("/api/automation/calendar/refresh", { method: "POST" });
+    await refreshAutomationStatus();
+  } catch (error) {
+    $("#calendarFeedMessage").textContent = error.message;
+    $("#calendarFeedState").textContent = "REFRESH FAILED";
+  } finally {
+    button.disabled = !state.automation?.calendar?.configured;
+    button.querySelector("span:first-child").textContent = "REFRESH EVENT CALENDAR";
+  }
+}
+
+async function toggleBrowserNotifications() {
+  if (!("Notification" in window)) return;
+  if (Notification.permission === "default") {
+    const permission = await Notification.requestPermission();
+    state.notificationsEnabled = permission === "granted";
+  } else if (Notification.permission === "granted") {
+    state.notificationsEnabled = !state.notificationsEnabled;
+  }
+  updateNotificationButton();
+  showNotificationToast(state.notificationsEnabled ? "Browser alerts enabled for new automatic BUY/SELL signals." : "Browser alerts paused; in-page signals remain active.");
+}
+
 async function importCsv() {
   const file = $("#csvFile").files?.[0];
   if (!file) return;
@@ -350,7 +542,7 @@ async function resetDemo() {
   try {
     const pair = $("#pairSelect").value || state.market?.pair || "EUR/USD";
     await api(`/api/reset-demo?pair=${encodeURIComponent(pair)}`, { method: "POST" });
-    $("#importStatus").textContent = "Synthetic demo data restored. Archived CSV datasets remain on disk.";
+    $("#importStatus").textContent = "Synthetic demo restored; archived CSV datasets remain. Live feed automation is paused until you explicitly sync it again.";
     await Promise.all([loadMarket(), refreshHistory(), refreshStorageSummary()]);
     scheduleAutomaticBacktest();
   } catch (error) {
@@ -536,33 +728,13 @@ function renderProviderKeySlots() {
 
 function updateProviderConnectionStatus() {
   const activeKeys = state.providerKeys.filter((key) => key.trim()).length;
-  const hasEdits = Boolean($("#providerName").value.trim() || $("#providerApiUrl").value.trim() || activeKeys);
-  let status = "NOT CONNECTED";
-  let detail = "No provider configured · synthetic demo active";
-  let pageMessage = "No provider is configured. Synthetic demo data remains active.";
-  let formMessage = "Keys stay in browser memory only. They are not saved to disk or sent to Orbix’s server.";
-  const indicator = $("#connectionIndicator");
-  const pageIndicator = $("#providerStatusIndicator");
-  [indicator, pageIndicator].forEach((dot) => dot?.classList.remove("is-configured", "is-pending"));
-
+  const hasNotes = Boolean($("#providerName").value.trim() || $("#providerApiUrl").value.trim() || activeKeys);
+  let formMessage = "These browser-only notes are not sent to the server and do not configure a live feed.";
   if (state.providerConfig) {
-    status = "CONFIGURED · NOT CONNECTED";
-    detail = `${state.providerConfig.name} · ${activeKeys} key${activeKeys === 1 ? "" : "s"} in this session · not tested`;
-    pageMessage = `${state.providerConfig.name} is saved in this tab’s memory. It is not connected or tested; a provider-specific adapter is needed first.`;
-    formMessage = "Configuration kept in memory for this page session only. No credentials were sent, validated, or used.";
-    [indicator, pageIndicator].forEach((dot) => dot?.classList.add("is-configured"));
-  } else if (hasEdits) {
-    status = "UNSAVED SETTINGS";
-    detail = `${activeKeys} API key${activeKeys === 1 ? "" : "s"} entered · connection not tested`;
-    pageMessage = "Settings have not been saved for this tab session. No provider connection is active.";
-    formMessage = "Unsaved edits stay in this page’s memory. Keep them for this session when ready; they will not be sent anywhere.";
-    [indicator, pageIndicator].forEach((dot) => dot?.classList.add("is-pending"));
+    formMessage = `${state.providerConfig.name} saved as local reference notes only. They are not tested, transmitted, or used by Orbix’s built-in integrations.`;
+  } else if (hasNotes) {
+    formMessage = `${activeKeys} key note${activeKeys === 1 ? "" : "s"} entered in this tab. These values cannot connect a provider; use server environment variables instead.`;
   }
-
-  $("#connectionStatus").textContent = status;
-  $("#connectionDetail").textContent = detail;
-  $("#providerPageState").textContent = status;
-  $("#providerPageMessage").textContent = pageMessage;
   $("#providerFormStatus").textContent = formMessage;
   renderCreditDashboard();
 }
@@ -827,6 +999,9 @@ function startBlackholeAnimation() {
 
 function wireEvents() {
   $("#generateButton").addEventListener("click", generateSignal);
+  $("#enableNotifications").addEventListener("click", toggleBrowserNotifications);
+  $("#syncLiveFeedButton").addEventListener("click", syncLiveFeed);
+  $("#refreshCalendarButton").addEventListener("click", refreshCalendarNow);
   $("#backtestButton").addEventListener("click", () => runBacktest(true));
   $("#pairSelect").addEventListener("change", async () => {
     await loadMarket();
@@ -923,6 +1098,7 @@ async function start() {
   wireEvents();
   renderProviderKeySlots();
   updateProviderConnectionStatus();
+  updateNotificationButton();
   initializeBlackholeAnimation();
   let route = window.location.hash.slice(1);
   if (!Object.hasOwn(ROUTES, route)) {
@@ -930,8 +1106,9 @@ async function start() {
     window.history.replaceState(null, "", "#dashboard");
   }
   setActivePage(route, false);
-  await Promise.all([loadStrategies(), loadMarket(), refreshHistory(), refreshStorageSummary()]);
+  await Promise.all([loadStrategies(), loadMarket(), refreshHistory(), refreshStorageSummary(), refreshAutomationStatus()]);
   scheduleAutomaticBacktest();
+  window.setInterval(() => { void refreshAutomationStatus(); }, 10000);
   if (state.route === "dashboard") startBlackholeAnimation();
 }
 

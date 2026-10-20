@@ -31,6 +31,7 @@ class PaperLedger:
                     side TEXT NOT NULL,
                     entry_price REAL NOT NULL,
                     generated_at TEXT NOT NULL,
+                    entry_time TEXT NOT NULL DEFAULT '',
                     expires_at TEXT NOT NULL,
                     probability_up REAL,
                     source TEXT NOT NULL,
@@ -46,6 +47,8 @@ class PaperLedger:
             columns = {row["name"] for row in connection.execute("PRAGMA table_info(signals)")}
             if "dataset_id" not in columns:
                 connection.execute("ALTER TABLE signals ADD COLUMN dataset_id TEXT NOT NULL DEFAULT ''")
+            if "entry_time" not in columns:
+                connection.execute("ALTER TABLE signals ADD COLUMN entry_time TEXT NOT NULL DEFAULT ''")
             connection.execute(
                 """CREATE TABLE IF NOT EXISTS learning_events (
                     signal_id TEXT PRIMARY KEY,
@@ -65,9 +68,9 @@ class PaperLedger:
         with self._connect() as connection:
             connection.execute(
                 """INSERT OR IGNORE INTO signals
-                (signal_id, pair, strategy, side, entry_price, generated_at, expires_at,
+                (signal_id, pair, strategy, side, entry_price, generated_at, entry_time, expires_at,
                  probability_up, source, reason, features_json, dataset_id, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     signal.signal_id,
                     signal.pair,
@@ -75,6 +78,7 @@ class PaperLedger:
                     signal.side,
                     signal.entry_price,
                     signal.generated_at.isoformat(),
+                    (signal.entry_time or signal.generated_at).isoformat(),
                     signal.expires_at.isoformat(),
                     signal.probability_up,
                     signal.source,
@@ -94,8 +98,19 @@ class PaperLedger:
         for row in rows:
             item = dict(row)
             item.pop("features_json", None)
+            item["entry_time"] = item.get("entry_time") or item["generated_at"]
             result.append(item)
         return result
+
+    def has_signal_for_time(self, pair: str, strategy: str, dataset_id: str, entry_time: datetime) -> bool:
+        timestamp = entry_time.astimezone(timezone.utc).isoformat()
+        with self._connect() as connection:
+            row = connection.execute(
+                """SELECT 1 FROM signals WHERE pair = ? AND strategy = ? AND dataset_id = ?
+                   AND COALESCE(NULLIF(entry_time, ''), generated_at) = ? LIMIT 1""",
+                (pair, strategy, dataset_id, timestamp),
+            ).fetchone()
+        return row is not None
 
     def get(self, signal_id: str) -> dict | None:
         with self._connect() as connection:

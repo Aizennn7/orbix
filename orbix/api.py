@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 import tempfile
 from typing import Callable
@@ -10,6 +12,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from .automation import AutomationService, ProviderError
 from .backtest import run_walk_forward_backtest
 from .runtime import BACKTEST_WINDOW, runtime
 from .strategies import strategy_catalog_payload
@@ -20,10 +23,23 @@ WEB_DIR = ROOT / "web"
 MAX_IMPORT_BYTES = 1024 * 1024 * 1024
 MAX_APPEND_BYTES = 64 * 1024 * 1024
 
+automation = AutomationService(runtime)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await automation.start()
+    try:
+        yield
+    finally:
+        await automation.stop()
+
+
 app = FastAPI(
     title="Orbix Signal Lab",
     description="A signal-only research and paper-testing dashboard. No broker orders are sent.",
-    version="0.1.0",
+    version="0.2.0",
+    lifespan=lifespan,
 )
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
 
@@ -76,13 +92,16 @@ def index() -> HTMLResponse:
 
 @app.get("/api/health")
 def health() -> dict:
+    automation_state = automation.status()
+    market_state = automation_state["market"]
     with runtime.lock:
         storage = runtime.storage_summary()
         return {
             "status": "ok",
             "project": "Orbix Signal Lab",
             "data_source": runtime.source,
-            "live_feed_connected": False,
+            "live_feed_connected": bool(market_state["connected"] and market_state["active_dataset_is_provider"] and market_state["data_fresh"]),
+            "event_calendar_connected": automation_state["calendar"]["connected"],
             "order_execution": False,
             "candles_loaded": runtime.candle_count,
             "candles_in_memory": len(runtime.candles),
@@ -90,6 +109,7 @@ def health() -> dict:
             "storage_path": storage["path"],
             "archived_candles": storage["candles_archived"],
             "online_learning_updates": runtime.ledger.learning_summary()["online_updates"],
+            "automatic_signals_active": automation_state["automatic_signals_active"],
         }
 
 
@@ -105,6 +125,31 @@ def storage_status() -> dict:
 def learning_status() -> dict:
     with runtime.lock:
         return runtime.learning_summary()
+
+
+@app.get("/api/automation/status")
+def automation_status() -> dict:
+    return automation.status()
+
+
+@app.post("/api/automation/sync")
+async def sync_live_feed() -> dict:
+    try:
+        return await asyncio.to_thread(automation.sync_market, True)
+    except ProviderError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/automation/calendar/refresh")
+async def refresh_calendar() -> dict:
+    try:
+        return await asyncio.to_thread(automation.sync_calendar)
+    except ProviderError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.post("/api/datasets/{dataset_id}/activate")
@@ -126,11 +171,18 @@ def market(pair: str = "EUR/USD", limit: int = 180) -> dict:
             elif pair != runtime.pair:
                 raise ValueError(f"Imported CSV data is for {runtime.pair}; reset to demo to switch pairs")
             candles = runtime.candles[-limit:]
+            automation_market = automation.status()["market"]
+            live_feed_connected = bool(
+                automation_market["connected"]
+                and automation_market["active_dataset_is_provider"]
+                and automation_market["data_fresh"]
+            )
             return {
                 "pair": runtime.pair,
                 "timeframe": "M1",
                 "source": runtime.source,
-                "live_feed_connected": False,
+                "source_label": "LIVE TWELVE DATA" if live_feed_connected else runtime.source,
+                "live_feed_connected": live_feed_connected,
                 "candles": [candle.to_dict() for candle in candles],
                 "latest": candles[-1].to_dict() if candles else None,
                 "total_candles": runtime.candle_count,
@@ -148,8 +200,27 @@ def strategies() -> dict:
 
 @app.post("/api/signal")
 def generate_signal(payload: SignalRequest) -> dict:
+    guard = automation.evaluate_news(payload.pair.upper().strip())
+    safety_reason = guard["message"] if guard["status"] == "BLACKOUT" else None
+    market_status = automation.status()["market"]
     try:
-        return runtime.generate_signal(payload.pair, payload.strategy, payload.horizon)
+        signal = runtime.generate_signal(
+            payload.pair,
+            payload.strategy,
+            payload.horizon,
+            generated_at=datetime.now(timezone.utc),
+            is_live=bool(
+                market_status["connected"]
+                and market_status["active_dataset_is_provider"]
+                and market_status["data_fresh"]
+            ),
+            safety_filter_reason=safety_reason,
+        )
+        strategy_names = {item["id"]: item["name"] for item in strategy_catalog_payload()["executable"]}
+        signal["heading"] = f"{strategy_names.get(payload.strategy, payload.strategy)} · {signal['side']}"
+        signal["news_guard"] = guard
+        signal["automatic"] = False
+        return signal
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -225,6 +296,7 @@ async def append_candles(request: Request, pair: str = "") -> dict:
 def reset_demo(pair: str = "EUR/USD") -> dict:
     try:
         runtime.reset_demo(pair)
+        automation.pause_market_feed()
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {
@@ -232,7 +304,7 @@ def reset_demo(pair: str = "EUR/USD") -> dict:
         "pair": runtime.pair,
         "source": runtime.source,
         "live_feed_connected": False,
-        "note": "Stored CSV datasets remain archived; demo is now active.",
+        "note": "Stored CSV datasets remain archived; demo is now active and the live feed is paused until explicitly reactivated.",
     }
 
 
@@ -242,7 +314,7 @@ def recent_signals() -> dict:
         signals = runtime.ledger.list_recent()
         active_dataset = runtime.dataset_id()
         for signal in signals:
-            signal["entry_time"] = signal["generated_at"]
+            signal["entry_time"] = signal.get("entry_time") or signal["generated_at"]
             signal["prediction_time"] = signal["expires_at"]
             signal["can_resolve"] = (
                 signal["status"] == "PENDING"
