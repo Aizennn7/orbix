@@ -13,7 +13,29 @@ const ROUTES = {
 const state = { market: null, strategies: null, lastSignal: null, route: "dashboard", botClock: null, brokerTicket: null, providers: null, providersBusy: false, providerClearArmed: false, providerClearTimer: null, lastBacktestKey: null, backtestTimer: null, backtestRunning: false, automation: null, lastAutoSignalId: null, lastAutoCandleTimestamp: null, notificationsEnabled: false, toastTimer: null, telegram: null, telegramBusy: false, future: null, futureBusy: false, abstentions: null, modelSource: null, trader: null, authEnabled: false, csrf: null };
 const $ = (selector) => document.querySelector(selector);
 
+// Static mode is set only by the generated docs/ snapshot served from GitHub
+// Pages, which has no backend. It reads pre-captured JSON and refuses writes.
+function staticSnapshotPath(path) {
+  const base = String(path).split("?")[0].replace(/^\/api\//, "");
+  return `api-data/${base.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "")}.json`;
+}
+
+async function staticApi(path, options = {}) {
+  const method = String(options.method || "GET").toUpperCase();
+  if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
+    throw new Error(
+      "This is a read-only static snapshot. Actions that change data need the live app running on a Python host."
+    );
+  }
+  const response = await fetch(staticSnapshotPath(path), { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error("This snapshot has no captured data for that view.");
+  }
+  return response.json();
+}
+
 async function api(path, options = {}) {
+  if (window.ORBIX_STATIC === true) return staticApi(path, options);
   const method = String(options.method || "GET").toUpperCase();
   const requestsWrite = !["GET", "HEAD", "OPTIONS"].includes(method);
   if (state.csrf && requestsWrite && !(options.headers || {})["X-Orbix-CSRF"]) {

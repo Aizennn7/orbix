@@ -1,0 +1,143 @@
+{
+  "clock": {
+    "data_time": "2026-10-20T08:57:00Z",
+    "lag_seconds": 607.8,
+    "mode": "LIVE",
+    "reference": "2026-10-20T09:07:07.790261Z",
+    "server_time": "2026-10-20T09:07:07.790261Z",
+    "source": "SYNTHETIC DEMO"
+  },
+  "contexts": [],
+  "dataset_id": "0da1e25a50f831bbc39ddc1775f3c02f8d505800310d76ae58eda703e4fffe18",
+  "journal": [],
+  "pair": "EUR/USD",
+  "reference": "2026-10-20T09:07:07.790261+00:00",
+  "reviews": [
+    {
+      "accuracy": null,
+      "by_session": [],
+      "date": "2026-10-14",
+      "lesson": "No lessons from an empty day; the budget and session rules were not tested.",
+      "losses": 0,
+      "net_pips": 0.0,
+      "resolved": 0,
+      "summary": "No trades. Waiting is a decision too.",
+      "ties": 0,
+      "trades": 0,
+      "wins": 0
+    },
+    {
+      "accuracy": null,
+      "by_session": [],
+      "date": "2026-10-15",
+      "lesson": "No lessons from an empty day; the budget and session rules were not tested.",
+      "losses": 0,
+      "net_pips": 0.0,
+      "resolved": 0,
+      "summary": "No trades. Waiting is a decision too.",
+      "ties": 0,
+      "trades": 0,
+      "wins": 0
+    },
+    {
+      "accuracy": null,
+      "by_session": [],
+      "date": "2026-10-16",
+      "lesson": "No lessons from an empty day; the budget and session rules were not tested.",
+      "losses": 0,
+      "net_pips": 0.0,
+      "resolved": 0,
+      "summary": "No trades. Waiting is a decision too.",
+      "ties": 0,
+      "trades": 0,
+      "wins": 0
+    },
+    {
+      "accuracy": null,
+      "by_session": [],
+      "date": "2026-10-17",
+      "lesson": "No lessons from an empty day; the budget and session rules were not tested.",
+      "losses": 0,
+      "net_pips": 0.0,
+      "resolved": 0,
+      "summary": "No trades. Waiting is a decision too.",
+      "ties": 0,
+      "trades": 0,
+      "wins": 0
+    },
+    {
+      "accuracy": null,
+      "by_session": [],
+      "date": "2026-10-18",
+      "lesson": "No lessons from an empty day; the budget and session rules were not tested.",
+      "losses": 0,
+      "net_pips": 0.0,
+      "resolved": 0,
+      "summary": "No trades. Waiting is a decision too.",
+      "ties": 0,
+      "trades": 0,
+      "wins": 0
+    },
+    {
+      "accuracy": null,
+      "by_session": [],
+      "date": "2026-10-19",
+      "lesson": "No lessons from an empty day; the budget and session rules were not tested.",
+      "losses": 0,
+      "net_pips": 0.0,
+      "resolved": 0,
+      "summary": "No trades. Waiting is a decision too.",
+      "ties": 0,
+      "trades": 0,
+      "wins": 0
+    },
+    {
+      "accuracy": null,
+      "by_session": [],
+      "date": "2026-10-20",
+      "lesson": "No lessons from an empty day; the budget and session rules were not tested.",
+      "losses": 0,
+      "net_pips": 0.0,
+      "resolved": 0,
+      "summary": "No trades. Waiting is a decision too.",
+      "ties": 0,
+      "trades": 0,
+      "wins": 0
+    }
+  ],
+  "source": "SYNTHETIC DEMO",
+  "status": {
+    "apply_rules": false,
+    "awake": false,
+    "budget": {
+      "max": 200,
+      "remaining": 200,
+      "used": 0
+    },
+    "config_error": null,
+    "cooldown_until": null,
+    "enabled": true,
+    "grade_note": "Conviction is a label for distance from a coin flip plus ensemble agreement. It is not a probability of profit.",
+    "losses_today": 0,
+    "max_daily_losses": 100,
+    "next_open": "2026-10-20T12:30:00+00:00",
+    "note": "Synthetic demo or no real dataset. Rules apply once real candles are loaded.",
+    "reference": "2026-10-20T09:07:07.790261+00:00",
+    "rules": {
+      "context_min_samples": 200,
+      "context_min_win_rate": 0.4,
+      "cooldown_after_losses": 12,
+      "cooldown_minutes": 10,
+      "max_open_trades": 1,
+      "min_spacing_minutes": 3,
+      "open_quiet_minutes": 10
+    },
+    "session": "London",
+    "sessions": "07:00-11:00, 12:30-16:30",
+    "spacing_until": null,
+    "streak": 0,
+    "timezone": "UTC",
+    "weekdays_only": true,
+    "window": "07:00-11:00"
+  }
+}

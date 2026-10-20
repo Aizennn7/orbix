@@ -1,0 +1,10 @@
+{
+  "asset_format": "EURUSD",
+  "credentials_required": false,
+  "manual_handoff": true,
+  "name": "Pocket Option",
+  "note": "Pocket Option has no official public trading API. Orbix formats a manual ticket and never logs in, stores broker credentials, or sends orders. A broker integration that needs a session cookie would be unofficial, against the broker's terms, and unsafe to automate.",
+  "official_api": false,
+  "order_execution": false,
+  "url": "https://pocketoption.com/"
+}

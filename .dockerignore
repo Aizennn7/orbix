@@ -1,0 +1,38 @@
+# Keep the build context small and never ship runtime state or secrets.
+.git
+.github
+.venv
+venv
+__pycache__
+*.py[cod]
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+
+# Runtime data: candles, ledger, learned models, provider keys, session secret
+data
+*.duckdb
+*.duckdb.wal
+*.sqlite3
+provider_settings.json
+session_secret
+session_secret.tmp
+
+# Local configuration
+.env
+.env.*
+!.env.example
+
+# Tests and docs are not needed inside the image
+tests
+docs
+*.md
+!README.md
+
+# Editor and OS noise
+.DS_Store
+.idea
+.vscode
+*.log

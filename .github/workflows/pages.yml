@@ -1,0 +1,60 @@
+name: Deploy static snapshot to GitHub Pages
+
+# GitHub Pages serves the read-only snapshot in docs/, not the FastAPI app.
+# See README ("GitHub Pages (static snapshot only)"). The live app needs a
+# Python host; this workflow only publishes already-captured JSON.
+
+on:
+  push:
+    branches:
+      - main
+      - arena/7b0574e1-orbix
+    paths:
+      - "docs/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Package docs/
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Verify the snapshot is present
+        run: |
+          test -f docs/index.html || { echo "docs/index.html is missing"; exit 1; }
+          test -f docs/api-data/preflight.json || { echo "docs/api-data is missing"; exit 1; }
+          test -f docs/snapshot.json || { echo "docs/snapshot.json is missing"; exit 1; }
+          echo "Snapshot captured at:"
+          python3 -c "import json;print(json.load(open('docs/snapshot.json'))['generated_at'])"
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+  deploy:
+    name: Deploy to Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

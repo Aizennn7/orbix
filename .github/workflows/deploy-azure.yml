@@ -1,0 +1,99 @@
+name: Deploy to Azure Web App
+
+# Replaces the Node.js starter workflow: Orbix is a Python (FastAPI + DuckDB)
+# app, so the build installs requirements.txt and ships a source zip that App
+# Service builds with Oryx.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "orbix/**"
+      - "web/**"
+      - "tests/**"
+      - "requirements.txt"
+      - "pyproject.toml"
+      - "startup.sh"
+      - ".env.example"
+      - ".github/workflows/deploy-azure.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-azure-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  build:
+    name: Test and package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run the test suite
+        env:
+          ORBIX_DATA_DIR: ${{ runner.temp }}/orbix-test-data
+          ORBIX_DASHBOARD_PASSWORD: ""
+          ORBIX_DASHBOARD_PASSWORD_HASH: ""
+          ORBIX_SESSION_SECRET: ""
+        run: python -m unittest discover -s tests -t . -v
+
+      - name: Build artifact
+        run: |
+          rm -f release.zip
+          zip -r release.zip . \
+            -x ".git/*" ".github/*" ".venv/*" "venv/*" "data/*" \
+               "**/__pycache__/*" "*.py[cod]" ".pytest_cache/*" \
+               ".env" "release.zip" "tests/*"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: orbix-app
+          path: release.zip
+          retention-days: 5
+          if-no-files-found: error
+
+      - name: Deployment configuration missing
+        if: vars.AZURE_WEBAPP_NAME == ''
+        run: |
+          echo "::notice title=Deploy skipped::Set the repository variable AZURE_WEBAPP_NAME and the secret AZURE_WEBAPP_PUBLISH_PROFILE to enable deployment."
+
+  deploy:
+    name: Deploy to Azure
+    needs: build
+    if: vars.AZURE_WEBAPP_NAME != ''
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://${{ vars.AZURE_WEBAPP_NAME }}.azurewebsites.net
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: orbix-app
+
+      - name: Deploy
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ vars.AZURE_WEBAPP_NAME }}
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          package: release.zip

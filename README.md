@@ -39,7 +39,75 @@ Orbix can run on a real Twelve Data feed with a live news guard, but it does **n
 8. **Execution is manual.** `GET /api/broker` reports `official_api: false` and `order_execution: false`. Pocket Option has no official public trading API, so Orbix shows a manual CALL/PUT ticket instead of sending an order. No cookie scraping or unofficial order bridge is included.
 9. **No profit claim.** The collected cadence sample was 149 signals, 43.4% wins (95% CI 35.3–51.8%), below the 55.6% break-even at an 80% payout. That is a measurement, not a forecast. Start in paper mode and keep the size small until you have your own resolved record.
 
-`GET /api/preflight` reports the configuration and warm-up checks; `/api/health` exposes `live_feed_connected`, `event_calendar_connected`, `dashboard_auth_enabled`, and `clock`. Neither is a performance forecast.
+`GET /api/preflight` reports the configuration and warm-up checks; `/api/health` exposes `live_feed_connected`, `event_calendar_connected`, `dashboard_auth_enabled`, and `clock`. Neither is a performance forecast. `GET /healthz` is a minimal unauthenticated liveness probe for container and platform health checks; it reports only `{"status":"ok"}`, while all operational detail stays behind authentication on `/api/health`.
+
+## Deploy
+
+Three rules apply to every target below:
+
+1. **One worker.** DuckDB, SQLite, and the JSON markers are single-process stores. `--workers 1` is set in `startup.sh`, the Docker image, and the Azure workflow. Adding workers corrupts or locks the data files.
+2. **Persistent data directory.** `ORBIX_DATA_DIR` must point at a volume that survives restarts and redeploys. It holds the candle archive, the signal ledger, learned models, `provider_settings.json`, and the generated session secret. Without it, every restart looks like a fresh install and every login is invalidated.
+3. **Authentication before exposure.** Set `ORBIX_DASHBOARD_PASSWORD_HASH` (generate it with `python -m orbix.security`) and `ORBIX_SESSION_SECRET`. Serve the app behind HTTPS. Do not set `ORBIX_ALLOW_EMBED` in production.
+
+### Docker
+
+```bash
+docker build -t orbix-signal-lab .
+docker run -d --name orbix -p 8000:8000 \
+  -v orbix-data:/data \
+  -e ORBIX_DASHBOARD_PASSWORD_HASH='pbkdf2_sha256$...' \
+  -e ORBIX_SESSION_SECRET='<long random value>' \
+  orbix-signal-lab
+```
+
+The image runs as an unprivileged user, listens on `$PORT` (default 8000), and ships a `HEALTHCHECK` that probes `/healthz`. `docker-compose.yml` does the same with a named volume and reads optional overrides from `.env`:
+
+```bash
+cp .env.example .env   # optional; fill in login and provider values
+docker compose up -d --build
+```
+
+### Azure App Service
+
+`scripts/deploy-azure.sh` provisions the resource group, a Linux plan, and the web app, applies the startup command and app settings, packages the source, deploys it, and waits for `/healthz` to answer:
+
+```bash
+az login
+scripts/deploy-azure.sh
+```
+
+It reads `APP_NAME`, `RESOURCE_GROUP`, `LOCATION`, `PLAN_NAME`, `SKU`, and `DATA_DIR` from the environment when set, prompts for the dashboard password, stores only a PBKDF2 hash in App Service settings, and generates a session secret if `ORBIX_SESSION_SECRET` is not supplied. Re-running it updates the existing app. Two App Service settings matter: `SCM_DO_BUILD_DURING_DEPLOYMENT=true` so Oryx installs `requirements.txt`, and `WEBSITES_PORT=8000` to match the listening port. The data directory defaults to `/home/orbix-data`, the persistent path on App Service.
+
+For CI, `.github/workflows/deploy-azure.yml` runs the test suite on every push to `main`, packages the app, and deploys it with `azure/webapps-deploy`. It needs two repository settings:
+
+- variable `AZURE_WEBAPP_NAME`
+- secret `AZURE_WEBAPP_PUBLISH_PROFILE` (from *App Service → Get publish profile*)
+
+Until both exist the deploy job is skipped with a notice, so the workflow never fails a push for missing configuration. Tests still run.
+
+### GitHub Pages (static snapshot only)
+
+GitHub Pages serves static files and cannot run Python, so it **cannot host the live app**. What it can host is a read-only snapshot: the real dashboard UI plus JSON captured from a real run.
+
+```bash
+# with the app running locally on :8000
+python scripts/build_static_demo.py --base-url http://127.0.0.1:8000
+# then commit docs/ and enable Pages -> deploy from branch, folder /docs
+```
+
+The build copies the real `app.js` and `styles.css`, injects `window.ORBIX_STATIC`, and writes one JSON file per endpoint into `docs/api-data/`. In that mode `api()` reads the captured files and refuses every write with an explicit message. A banner states the capture time and the data source, so a snapshot is never mistaken for a live feed. `docs/snapshot.json` records the same metadata.
+
+Regenerate the snapshot whenever you want it to reflect newer data; it does not update itself.
+
+### Any other host
+
+`startup.sh` is deliberately portable and honours `$PORT`:
+
+```bash
+PORT=10000 ORBIX_DATA_DIR=/var/lib/orbix bash startup.sh
+```
+
+Point the platform's health check at `/healthz` and keep the data directory on a real disk.
 
 ## Run it without live credentials
 

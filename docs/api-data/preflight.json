@@ -1,0 +1,136 @@
+{
+  "checks": [
+    {
+      "detail": "No Twelve Data key configured; only imported CSV history can drive signals.",
+      "id": "market_provider",
+      "label": "Market provider",
+      "required": true,
+      "status": "blocked"
+    },
+    {
+      "detail": "The active dataset is SYNTHETIC DEMO, not the provider feed.",
+      "id": "provider_dataset",
+      "label": "Active provider dataset",
+      "required": true,
+      "status": "blocked"
+    },
+    {
+      "detail": "Latest bar is 608s old (limit 180s).",
+      "id": "freshness",
+      "label": "Latest completed bar",
+      "required": true,
+      "status": "blocked"
+    },
+    {
+      "detail": "Polls every 60s; a bar older than 180s is treated as stale. The poll interval fits inside the freshness window.",
+      "id": "refresh_cadence",
+      "label": "Feed cadence",
+      "required": false,
+      "status": "ready"
+    },
+    {
+      "detail": "No Finnhub calendar key configured; news risk cannot be cleared.",
+      "id": "calendar",
+      "label": "Economic calendar",
+      "required": true,
+      "status": "blocked"
+    },
+    {
+      "detail": "Economic calendar not configured; news risk cannot be cleared.",
+      "id": "news_guard",
+      "label": "News guard",
+      "required": true,
+      "status": "blocked"
+    },
+    {
+      "detail": "Automatic signals are enabled.",
+      "id": "scheduler",
+      "label": "Automatic signals",
+      "required": true,
+      "status": "ready"
+    },
+    {
+      "detail": "Watches imported datasets for newly appended fresh bars; signals are paper-only and never auto-posted.",
+      "id": "paper_automation",
+      "label": "Imported paper automation",
+      "required": false,
+      "status": "ready"
+    },
+    {
+      "detail": "No trained champion yet. Import history, then retrain or generate a signal.",
+      "id": "model",
+      "label": "Champion model",
+      "required": true,
+      "status": "blocked"
+    },
+    {
+      "detail": "Raw probabilities. 0 of 60 resolved outcomes needed for a calibration fit (60 to go).",
+      "id": "calibration",
+      "label": "Probability calibration",
+      "required": false,
+      "status": "warning"
+    },
+    {
+      "detail": "Optional channel delivery is not configured.",
+      "id": "telegram",
+      "label": "Telegram delivery",
+      "required": false,
+      "status": "warning"
+    },
+    {
+      "detail": "No dashboard password or hash is set. Anyone who can reach this URL can change keys, pause signals, or post to Telegram.",
+      "id": "dashboard_auth",
+      "label": "Dashboard authentication",
+      "required": false,
+      "status": "warning"
+    },
+    {
+      "detail": "Orbix sends no broker orders. Pocket Option has no official public API, so live tickets remain a manual handoff.",
+      "id": "execution",
+      "label": "Order execution",
+      "required": false,
+      "status": "warning"
+    }
+  ],
+  "dashboard_auth_enabled": false,
+  "dataset_learning": {
+    "accuracy": null,
+    "accuracy_ci95": null,
+    "correct": 0,
+    "enabled": true,
+    "last_cursor": null,
+    "last_entry_time": null,
+    "latest_entry": "2026-10-20T08:57:00Z",
+    "learned": 0,
+    "note": "One test-before-learn update per completed bar, whether or not a signal was delivered. These are not paper trades and are excluded from win rate and Telegram.",
+    "resolved": 0,
+    "scored": 0,
+    "total": 0
+  },
+  "execution_mode": "MANUAL",
+  "execution_ready": false,
+  "generated_at": "2026-10-20T09:07:07.574537Z",
+  "note": "Preflight checks configuration and warm-up only. Readiness is not a performance forecast, and calibration describes past outcomes.",
+  "pair": "EUR/USD",
+  "ready": false,
+  "shadow": {
+    "accuracy": null,
+    "accuracy_ci95": null,
+    "learned": 0,
+    "losses": 0,
+    "pending": 0,
+    "resolved": 0,
+    "ties": 0,
+    "total": 0,
+    "wins": 0
+  },
+  "source": "SYNTHETIC DEMO",
+  "warmup": {
+    "calibration_starts_after": 60,
+    "calibration_state": "raw",
+    "resolved_outcomes": 0,
+    "to_calibration": 60,
+    "to_updates": 30,
+    "updates_start_after": 30
+  }
+}
