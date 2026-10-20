@@ -40,7 +40,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Orbix Signal Lab",
     description="A signal-only research and paper-testing dashboard. No broker orders are sent.",
-    version="0.3.0",
+    version="0.3.1",
     lifespan=lifespan,
 )
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
@@ -79,7 +79,12 @@ class TelegramAutoRequest(BaseModel):
 
 def _telegram_http_error(exc: TelegramError) -> HTTPException:
     message = str(exc)
-    status_code = 409 if message.startswith("Set ORBIX_") or message.startswith("Configure ORBIX_") else 502
+    if message.startswith(("Set ORBIX_", "Configure ORBIX_")):
+        status_code = 409
+    elif message.startswith("Daily cap"):
+        status_code = 429
+    else:
+        status_code = 502
     return HTTPException(status_code=status_code, detail=message)
 
 
@@ -139,6 +144,14 @@ def storage_status() -> dict:
         summary = runtime.storage_summary()
         summary["datasets"] = runtime.candle_store.list_datasets(limit=50)
         return summary
+
+
+@app.get("/api/abstentions")
+def abstentions(days: int = 7, limit: int = 25) -> dict:
+    days = max(1, min(days, 90))
+    limit = max(0, min(limit, 100))
+    with runtime.lock:
+        return runtime.abstention_summary(days=days, limit=limit)
 
 
 @app.get("/api/learning")

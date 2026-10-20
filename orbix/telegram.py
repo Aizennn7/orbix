@@ -32,21 +32,47 @@ class TelegramNotifier:
         }
 
     def send_message(self, text: str) -> dict[str, Any]:
+        payload = self._call(
+            "sendMessage",
+            {"chat_id": self.chat_id, "text": _clean_text(text)},
+            "Telegram message",
+        )
+        result = payload.get("result") or {}
+        return {
+            "message_id": result.get("message_id"),
+            "chat_id": result.get("chat", {}).get("id", self.chat_id),
+            "edited": False,
+        }
+
+    def edit_message_text(self, message_id: int | str, text: str) -> dict[str, Any]:
+        """Edit an existing post so the result replaces the signal, not follows it."""
+        if message_id in (None, ""):
+            raise TelegramError("A Telegram message id is required to edit a result.")
+        try:
+            numeric_id = int(message_id)
+        except (TypeError, ValueError):
+            raise TelegramError("Stored Telegram message id is not numeric.") from None
+        payload = self._call(
+            "editMessageText",
+            {"chat_id": self.chat_id, "message_id": numeric_id, "text": _clean_text(text)},
+            "Telegram edit",
+        )
+        result = payload.get("result") or {}
+        return {
+            "message_id": result.get("message_id", numeric_id),
+            "chat_id": result.get("chat", {}).get("id", self.chat_id),
+            "edited": True,
+        }
+
+    def _call(self, method: str, body: dict[str, Any], label: str) -> dict[str, Any]:
         if not self.configured:
             raise TelegramError(
                 "Set ORBIX_TELEGRAM_BOT_TOKEN and ORBIX_TELEGRAM_CHAT_ID on the server."
             )
-        message = str(text).strip()
-        if not message:
-            raise TelegramError("Telegram message cannot be empty.")
-        if len(message) > 4096:
-            raise TelegramError("Telegram message exceeds the 4096-character Bot API limit.")
-
-        url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
-        body = json.dumps({"chat_id": self.chat_id, "text": message}).encode("utf-8")
+        url = f"https://api.telegram.org/bot{self.bot_token}/{method}"
         request = Request(
             url,
-            data=body,
+            data=json.dumps(body).encode("utf-8"),
             headers={"Content-Type": "application/json", "Accept": "application/json"},
             method="POST",
         )
@@ -55,7 +81,7 @@ class TelegramNotifier:
                 payload_bytes = response.read(MAX_TELEGRAM_RESPONSE_BYTES + 1)
         except HTTPError as exc:
             description = self._description(exc.read(MAX_TELEGRAM_RESPONSE_BYTES))
-            raise TelegramError(f"Telegram rejected the message (HTTP {exc.code}): {description}") from None
+            raise TelegramError(f"{label} rejected (HTTP {exc.code}): {description}") from None
         except (URLError, TimeoutError, OSError):
             raise TelegramError("Telegram could not be reached; check server egress and bot configuration.") from None
 
@@ -67,12 +93,8 @@ class TelegramNotifier:
             raise TelegramError("Telegram returned an unreadable response.") from None
         if not isinstance(payload, dict) or not payload.get("ok"):
             description = str(payload.get("description", "Telegram API reported an unknown error."))[:220]
-            raise TelegramError(f"Telegram rejected the message: {description}")
-        result = payload.get("result") or {}
-        return {
-            "message_id": result.get("message_id"),
-            "chat_id": result.get("chat", {}).get("id", self.chat_id),
-        }
+            raise TelegramError(f"{label} rejected: {description}")
+        return payload
 
     @staticmethod
     def _description(body: bytes) -> str:
@@ -82,3 +104,12 @@ class TelegramNotifier:
             return "check that the bot is an administrator with permission to post messages."
         description = str(payload.get("description", "unknown Bot API error"))[:220]
         return description
+
+
+def _clean_text(text: str) -> str:
+    message = str(text).strip()
+    if not message:
+        raise TelegramError("Telegram message cannot be empty.")
+    if len(message) > 4096:
+        raise TelegramError("Telegram message exceeds the 4096-character Bot API limit.")
+    return message

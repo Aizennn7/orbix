@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
+from .abstentions import REASON_LABELS, SESSION_ORDER, classify_reason, hour_bucket, session_for
 from .metrics import wilson_interval
 
 
@@ -49,6 +51,25 @@ class PaperLedger:
                 connection.execute("ALTER TABLE signals ADD COLUMN dataset_id TEXT NOT NULL DEFAULT ''")
             if "entry_time" not in columns:
                 connection.execute("ALTER TABLE signals ADD COLUMN entry_time TEXT NOT NULL DEFAULT ''")
+            connection.execute(
+                """CREATE TABLE IF NOT EXISTS abstentions (
+                    abstention_id TEXT PRIMARY KEY,
+                    pair TEXT NOT NULL,
+                    strategy TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    reason_code TEXT NOT NULL,
+                    reason TEXT NOT NULL,
+                    entry_time TEXT NOT NULL DEFAULT '',
+                    source TEXT NOT NULL DEFAULT '',
+                    dataset_id TEXT NOT NULL DEFAULT '',
+                    session TEXT NOT NULL,
+                    hour_utc INTEGER NOT NULL,
+                    created_at TEXT NOT NULL
+                )"""
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS abstentions_created_at ON abstentions (created_at)"
+            )
             connection.execute(
                 """CREATE TABLE IF NOT EXISTS learning_events (
                     signal_id TEXT PRIMARY KEY,
@@ -132,6 +153,203 @@ class PaperLedger:
             item["features"] = json.loads(item.pop("features_json"))
             result.append(item)
         return result
+
+    def record_abstention(
+        self,
+        *,
+        pair: str,
+        strategy: str,
+        reason: str,
+        kind: str = "gate",
+        entry_time: datetime | str | None = None,
+        source: str = "",
+        dataset_id: str = "",
+        now: datetime | None = None,
+    ) -> bool:
+        """Store one NO SIGNAL / skipped-bar decision. Returns False if duplicated.
+
+        Abstentions are evidence about restraint, not trades. They are deduplicated
+        by dataset, strategy, entry boundary, kind, and reason code so a repeated
+        poll of the same closed bar cannot inflate the counts.
+        """
+        created = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        reason_text = str(reason or "").strip()[:400] or "No reason recorded."
+        code = classify_reason(reason_text)
+        if isinstance(entry_time, datetime):
+            moment = entry_time if entry_time.tzinfo else entry_time.replace(tzinfo=timezone.utc)
+            entry_text = moment.astimezone(timezone.utc).isoformat()
+        else:
+            entry_text = str(entry_time or "")
+            moment = created
+            if entry_text:
+                try:
+                    parsed = datetime.fromisoformat(entry_text.replace("Z", "+00:00"))
+                    moment = parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+                except ValueError:
+                    moment = created
+        session = session_for(moment)
+        bucket = hour_bucket(moment)
+        digest = hashlib.blake2s(
+            f"{dataset_id}|{strategy}|{entry_text}|{kind}|{code}".encode("utf-8"), digest_size=10
+        ).hexdigest()
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """INSERT OR IGNORE INTO abstentions
+                (abstention_id, pair, strategy, kind, reason_code, reason, entry_time,
+                 source, dataset_id, session, hour_utc, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    digest,
+                    str(pair or "UNKNOWN"),
+                    str(strategy or "unknown"),
+                    str(kind or "gate"),
+                    code,
+                    reason_text,
+                    entry_text,
+                    str(source or ""),
+                    str(dataset_id or ""),
+                    session,
+                    int(bucket),
+                    created.isoformat(),
+                ),
+            )
+            return cursor.rowcount > 0
+
+    def abstention_summary(
+        self,
+        days: int = 7,
+        limit: int = 25,
+        now: datetime | None = None,
+    ) -> dict:
+        current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        days = max(1, min(int(days), 90))
+        cutoff = (current - timedelta(days=days)).isoformat()
+        day_start = current.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+        with self._connect() as connection:
+            all_time = int(connection.execute("SELECT COUNT(*) FROM abstentions").fetchone()[0])
+            today = int(
+                connection.execute(
+                    "SELECT COUNT(*) FROM abstentions WHERE created_at >= ?", (day_start,)
+                ).fetchone()[0]
+            )
+            rows = connection.execute(
+                """SELECT kind, reason_code, session, hour_utc, created_at
+                   FROM abstentions WHERE created_at >= ?""",
+                (cutoff,),
+            ).fetchall()
+            recent_rows = connection.execute(
+                """SELECT pair, strategy, kind, reason_code, reason, entry_time, session,
+                          hour_utc, created_at
+                   FROM abstentions ORDER BY created_at DESC LIMIT ?""",
+                (max(1, min(int(limit), 100)),),
+            ).fetchall()
+            decided = int(
+                connection.execute(
+                    "SELECT COUNT(*) FROM signals WHERE created_at >= ?", (cutoff,)
+                ).fetchone()[0]
+            )
+            resolved = connection.execute(
+                """SELECT entry_time, outcome FROM signals
+                   WHERE outcome IN ('WIN', 'LOSS') AND created_at >= ?""",
+                (cutoff,),
+            ).fetchall()
+
+        by_code: dict[str, int] = {}
+        by_session: dict[str, dict[str, int]] = {}
+        by_hour = [{"hour": hour, "gate": 0, "operational": 0} for hour in range(24)]
+        gate_count = 0
+        operational_count = 0
+        for row in rows:
+            kind = str(row["kind"])
+            code = str(row["reason_code"])
+            session = str(row["session"])
+            by_code[code] = by_code.get(code, 0) + 1
+            bucket = by_session.setdefault(session, {"gate": 0, "operational": 0})
+            if kind == "gate":
+                gate_count += 1
+                bucket["gate"] += 1
+            else:
+                operational_count += 1
+                bucket["operational"] += 1
+            hour_index = int(row["hour_utc"])
+            if 0 <= hour_index < 24:
+                by_hour[hour_index]["gate" if kind == "gate" else "operational"] += 1
+
+        window_total = len(rows)
+        code_rows = [
+            {
+                "code": code,
+                "label": REASON_LABELS.get(code, code),
+                "count": count,
+                "share": (count / window_total) if window_total else 0.0,
+            }
+            for code, count in sorted(by_code.items(), key=lambda item: (-item[1], item[0]))
+        ]
+        ordered_sessions = [name for name in SESSION_ORDER if name in by_session]
+        ordered_sessions += [name for name in by_session if name not in SESSION_ORDER]
+        session_rows = [
+            {
+                "session": name,
+                "gate": by_session[name]["gate"],
+                "operational": by_session[name]["operational"],
+                "total": by_session[name]["gate"] + by_session[name]["operational"],
+            }
+            for name in ordered_sessions
+        ]
+
+        outcomes: dict[str, dict[str, int]] = {}
+        for row in resolved:
+            session = session_for(row["entry_time"] or "")
+            bucket = outcomes.setdefault(session, {"wins": 0, "losses": 0})
+            bucket["wins" if row["outcome"] == "WIN" else "losses"] += 1
+        outcome_rows = []
+        for name in list(SESSION_ORDER) + [key for key in outcomes if key not in SESSION_ORDER]:
+            if name not in outcomes:
+                continue
+            wins = outcomes[name]["wins"]
+            losses = outcomes[name]["losses"]
+            total = wins + losses
+            outcome_rows.append({
+                "session": name,
+                "wins": wins,
+                "losses": losses,
+                "decisive": total,
+                "win_rate": (wins / total) if total else None,
+                "win_rate_ci95": wilson_interval(wins, total),
+            })
+
+        denominator = gate_count + decided
+        return {
+            "window_days": days,
+            "generated_at": current.isoformat(),
+            "totals": {"all_time": all_time, "today": today, "window": window_total},
+            "gate": {
+                "window": gate_count,
+                "today": sum(1 for row in rows if str(row["kind"]) == "gate" and str(row["created_at"]) >= day_start),
+            },
+            "operational": {"window": operational_count},
+            "decided_signals_window": decided,
+            "abstention_ratio": (gate_count / denominator) if denominator else None,
+            "by_code": code_rows,
+            "by_session": session_rows,
+            "by_hour": by_hour,
+            "outcomes_by_session": outcome_rows,
+            "recent": [
+                {
+                    "pair": row["pair"],
+                    "strategy": row["strategy"],
+                    "kind": row["kind"],
+                    "code": row["reason_code"],
+                    "label": REASON_LABELS.get(row["reason_code"], row["reason_code"]),
+                    "reason": row["reason"],
+                    "entry_time": row["entry_time"],
+                    "session": row["session"],
+                    "hour_utc": row["hour_utc"],
+                    "created_at": row["created_at"],
+                }
+                for row in recent_rows
+            ],
+        }
 
     def record_learning_event(
         self,

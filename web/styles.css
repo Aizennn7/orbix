@@ -505,3 +505,31 @@ h2 { font-size: 18px; font-weight: 530; letter-spacing: -.035em; margin: 0; }
   .future-alternative span { grid-column: 1 / -1; }
   .telegram-actions .button, .telegram-actions .button-primary { width: 100%; min-width: 0; }
 }
+
+/* Abstention ledger (Future page) */
+.future-abstention-panel { margin-top: 14px; padding: 22px; }
+.abstention-grid { margin-top: 15px; }
+.abstention-hours { display: grid; grid-template-columns: repeat(24, minmax(0, 1fr)); gap: 3px; align-items: end; height: 78px; margin: 18px 0 4px; padding-bottom: 2px; border-bottom: 1px solid var(--line); }
+.abstention-hour { display: flex; align-items: flex-end; height: 100%; min-width: 0; }
+.abstention-hour i { display: block; width: 100%; border-radius: 2px 2px 0 0; background: rgba(255,255,255,.72); transition: height .2s ease; }
+.abstention-hour i.is-empty { background: rgba(255,255,255,.13); }
+.abstention-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; margin-top: 18px; }
+.abstention-heading { display: block; color: var(--dim); font-size: 7px; letter-spacing: .13em; margin-bottom: 7px; }
+.abstention-session-list, .abstention-reason-list { display: grid; gap: 0; }
+.abstention-row { position: relative; display: grid; grid-template-columns: minmax(0, 1.15fr) auto auto; gap: 10px; align-items: baseline; padding: 7px 0; border-top: 1px solid rgba(255,255,255,.07); }
+.abstention-row:first-child { border-top: 0; }
+.abstention-row strong { font-size: 9px; font-weight: 540; overflow-wrap: anywhere; }
+.abstention-row span { color: var(--muted); font-size: 8px; white-space: nowrap; }
+.abstention-row em { font-style: normal; color: var(--dim); font-size: 7px; letter-spacing: .06em; text-align: right; white-space: nowrap; }
+.abstention-reason { grid-template-columns: minmax(0, 1fr) auto; padding-bottom: 12px; }
+.abstention-reason i { position: absolute; left: 0; bottom: 4px; height: 2px; border-radius: 1px; background: rgba(255,255,255,.5); }
+.abstention-session-list small, .abstention-reason-list small { color: var(--dim); font-size: 8px; }
+
+@media (max-width: 900px) {
+  .abstention-columns { grid-template-columns: 1fr; gap: 18px; }
+}
+@media (max-width: 760px) {
+  .abstention-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .abstention-row em { grid-column: 1 / -1; text-align: left; }
+  .abstention-hours { height: 60px; gap: 2px; }
+}

@@ -9,7 +9,7 @@ from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from orbix.automation import AutomationService
-from orbix.domain import Candle
+from orbix.domain import Candle, Signal
 from orbix.future import build_future_plan
 from orbix.runtime import Runtime
 from orbix.telegram import TelegramError, TelegramNotifier
@@ -27,12 +27,20 @@ class FakeTelegram:
     configured = True
     chat_id = "@orbix_test"
 
-    def __init__(self) -> None:
+    def __init__(self, edit_fails: bool = False) -> None:
         self.messages: list[str] = []
+        self.edits: list[tuple[int, str]] = []
+        self.edit_fails = edit_fails
 
     def send_message(self, text: str) -> dict:
         self.messages.append(text)
-        return {"message_id": 100 + len(self.messages), "chat_id": self.chat_id}
+        return {"message_id": 100 + len(self.messages), "chat_id": self.chat_id, "edited": False}
+
+    def edit_message_text(self, message_id: int, text: str) -> dict:
+        if self.edit_fails:
+            raise TelegramError("message can't be edited")
+        self.edits.append((int(message_id), text))
+        return {"message_id": int(message_id), "chat_id": self.chat_id, "edited": True}
 
 
 def sample_signal(**overrides) -> dict:
@@ -160,6 +168,111 @@ class TelegramDeliveryTests(unittest.TestCase):
         self.assertEqual(preview["status"], "preview")
         self.assertIn("ORBIX", preview["text"])
         self.assertFalse(fake.messages)
+
+
+class TelegramGuardrailTests(unittest.TestCase):
+    def _automation(self, folder: str, *, edit_fails: bool = False):
+        automation = AutomationService(Runtime(folder))
+        automation.telegram = FakeTelegram(edit_fails=edit_fails)
+        return automation
+
+    def test_daily_cap_blocks_automatic_posting(self) -> None:
+        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, TELEGRAM_ENV):
+            automation = self._automation(folder)
+            fake = automation.telegram
+            now = datetime.now(UTC)
+            automation._telegram_auto_post_enabled = True
+            automation._telegram_daily_date = now.date().isoformat()
+            automation._telegram_daily_count = automation.telegram_daily_cap
+            automation._latest_auto_signal = sample_signal()
+            automation._maybe_post_automatic_signal()
+        self.assertFalse(fake.messages)
+        self.assertIn("Daily cap", automation._telegram_last_skip_reason or "")
+        self.assertNotIn("abc123", automation._telegram_signal_ids)
+
+    def test_cooldown_blocks_then_allows(self) -> None:
+        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, TELEGRAM_ENV):
+            automation = self._automation(folder)
+            automation._telegram_auto_post_enabled = True
+            now = datetime.now(UTC)
+            automation._telegram_daily_date = now.date().isoformat()
+            automation._telegram_daily_count = 0
+            automation._telegram_last_sent_at = now
+            blocked, reason = automation._telegram_auto_gate(now)
+            allowed, _ = automation._telegram_auto_gate(now + timedelta(seconds=automation.telegram_cooldown_seconds + 1))
+        self.assertFalse(blocked)
+        self.assertIn("Cooldown", reason or "")
+        self.assertTrue(allowed)
+
+    def test_manual_send_refuses_past_daily_cap_unless_forced(self) -> None:
+        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, TELEGRAM_ENV):
+            automation = self._automation(folder)
+            fake = automation.telegram
+            now = datetime.now(UTC)
+            automation._telegram_daily_date = now.date().isoformat()
+            automation._telegram_daily_count = automation.telegram_daily_cap
+            automation._auto_signal_history = [sample_signal()]
+            with self.assertRaises(TelegramError) as context:
+                automation.send_telegram_batch(limit=1)
+            forced = automation.send_telegram_batch(limit=1, force=True)
+        self.assertIn("Daily cap", str(context.exception))
+        self.assertEqual(forced["status"], "sent")
+        self.assertEqual(len(fake.messages), 1)
+
+    def test_result_edits_the_original_message(self) -> None:
+        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, TELEGRAM_ENV):
+            automation = self._automation(folder)
+            fake = automation.telegram
+            signal = Signal(
+                signal_id="sig-edit",
+                pair="EUR/USD",
+                strategy="orbix_confluence",
+                side="BUY",
+                entry_price=1.085,
+                generated_at=datetime(2026, 10, 20, 12, 0, tzinfo=UTC),
+                expires_at=datetime(2026, 10, 20, 12, 1, tzinfo=UTC),
+                probability_up=0.61,
+                source="IMPORTED CSV",
+                reason="Orbix Confluence Gate 6/6: trend, momentum.",
+                entry_time=datetime(2026, 10, 20, 12, 0, tzinfo=UTC),
+            )
+            automation.runtime.ledger.record(signal, {}, dataset_id="d1")
+            automation._telegram_signal_ids = ["sig-edit"]
+            automation._telegram_message_ids = {"sig-edit": 42}
+            automation._post_outcome_results([{"signal_id": "sig-edit", "outcome": "WIN", "learned": True}])
+        self.assertEqual(len(fake.edits), 1)
+        message_id, edit_text = fake.edits[0]
+        self.assertEqual(message_id, 42)
+        self.assertIn("RESULT", edit_text)
+        self.assertIn("Edited in place", edit_text)
+        self.assertFalse(fake.messages)
+        self.assertIn("sig-edit", automation._telegram_edited_result_ids)
+
+    def test_result_falls_back_to_a_new_message_when_edit_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, TELEGRAM_ENV):
+            automation = self._automation(folder, edit_fails=True)
+            fake = automation.telegram
+            signal = Signal(
+                signal_id="sig-fallback",
+                pair="EUR/USD",
+                strategy="orbix_confluence",
+                side="SELL",
+                entry_price=1.085,
+                generated_at=datetime(2026, 10, 20, 12, 0, tzinfo=UTC),
+                expires_at=datetime(2026, 10, 20, 12, 1, tzinfo=UTC),
+                probability_up=0.39,
+                source="IMPORTED CSV",
+                reason="Orbix Confluence Gate 6/6: trend, momentum.",
+                entry_time=datetime(2026, 10, 20, 12, 0, tzinfo=UTC),
+            )
+            automation.runtime.ledger.record(signal, {}, dataset_id="d1")
+            automation._telegram_signal_ids = ["sig-fallback"]
+            automation._telegram_message_ids = {"sig-fallback": 77}
+            automation._post_outcome_results([{"signal_id": "sig-fallback", "outcome": "LOSS", "learned": False}])
+        self.assertEqual(len(fake.messages), 1)
+        self.assertIn("PAPER RESULT", fake.messages[0])
+        self.assertEqual(fake.edits, [])
+        self.assertNotIn("sig-fallback", automation._telegram_edited_result_ids)
 
 
 class FuturePlanTests(unittest.TestCase):

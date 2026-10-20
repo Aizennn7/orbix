@@ -42,6 +42,10 @@ Two pages are separate from the signal engine and change none of its rules.
 
 **Telegram** (`#telegram`) publishes already-recorded M1 signals to one channel through a server-side admin bot. The token and channel id are read only from `ORBIX_TELEGRAM_BOT_TOKEN` and `ORBIX_TELEGRAM_CHAT_ID`; the browser never receives them. Add the bot to the channel as an administrator with "Post messages". One-click sends are deduplicated by signal id, synthetic demo rows are blocked unless explicitly allowed, and timestamps follow `ORBIX_TELEGRAM_TIMEZONE` (default `Asia/Kolkata`). Automatic posting is off until enabled on the page or with `ORBIX_TELEGRAM_AUTO_POST=true`, and a paper result follows after an expiry resolves when the original signal was delivered. This is a publishing channel, not an order route.
 
+**Delivery guardrails.** Automatic posting is capped per UTC day (`ORBIX_TELEGRAM_DAILY_CAP`, default 40 messages) and spaced by `ORBIX_TELEGRAM_COOLDOWN_SECONDS` (default 60). Manual one-click sends count toward the same cap and are refused once it is reached; the connection test is exempt. When a paper outcome resolves for a signal that was delivered, Orbix edits the original message to show the result instead of posting a second one, and only falls back to a new message if Telegram refuses the edit.
+
+**Abstention ledger.** Every `NO SIGNAL` decision is stored with a stable reason code (volatility band, model veto, score below threshold, news blackout, stale bar, duplicate entry, provider unavailable), the UTC session, and the hour. `GET /api/abstentions` reports totals, a per-hour histogram, a per-session split, the share of abstentions relative to decided signals, and the resolved paper win/loss record for each session. Abstentions never enter the paper-signal or learning tables.
+
 **Future** (`#future`) analyses one pair at a time and lists the next minute boundaries as ARMED or BLOCKED. It never fills in a direction for a candle that has not closed: the gate runs after the close, exactly as it does for automatic signals. It also replays the gate over the most recent closed bars and shows walk-forward hit rate, its Wilson 95% interval, signal count, break-even rate, and the payout assumption. The replay is a transparency check, not a forecast.
 
 Liquidity ordering in the Future page uses the BIS Triennial Central Bank Survey, where EUR/USD has the largest share of turnover. Liquidity lowers spread and gap cost; it does not make a pair's next minute more predictable. Claims such as "95% accuracy" or "sureshot" seen on Telegram channels are marketing, not verified performance.
@@ -64,7 +68,7 @@ Useful endpoints:
 - `POST /api/signal` and `/api/backtest`
 - `POST /api/import?pair=EUR/USD`, `/api/candles/append?pair=EUR/USD`, `/api/feedback`
 - `POST /api/reset-demo?pair=EUR/USD`
-- `GET /api/telegram/status`, `GET /api/future/plan?count=6`
+- `GET /api/telegram/status`, `GET /api/future/plan?count=6`, `GET /api/abstentions?days=7`
 - `POST /api/telegram/send`, `/api/telegram/test`, `/api/telegram/auto`
 
 This project is for research and software learning, not financial advice. One-minute signals can lose; no model, indicator, or news feed can ensure profit or eliminate repeat errors. Verify provider timestamps and quotes against the intended venue before interpreting paper results.

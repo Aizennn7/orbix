@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#050505">
   <title>Dashboard — Orbix Signal Lab</title>
-  <link rel="stylesheet" href="/static/styles.css?v=11">
+  <link rel="stylesheet" href="/static/styles.css?v=12">
 </head>
 <body>
   <div class="noise" aria-hidden="true"></div>
@@ -370,6 +370,21 @@
         <p class="micro-copy">Replay rows are re-runs over candles that have already closed. They are a transparency check on the gate, not a promise about the next candle.</p>
         <a class="text-button inline-link" href="#telegram" data-route="telegram">PUBLISH RECORDED SIGNALS ON TELEGRAM ↗</a>
       </article>
+      <article class="panel future-abstention-panel">
+        <div class="panel-heading"><div><div class="eyebrow small-eyebrow">RESTRAINT, MEASURED</div><h2>Abstention ledger</h2></div><span class="mode-tag" id="abstentionWindow">7 DAYS</span></div>
+        <div class="future-evidence-grid abstention-grid">
+          <div class="result-stat"><span>GATE ABSTENTIONS</span><strong id="abstentionGate">—</strong></div>
+          <div class="result-stat"><span>OPERATIONAL SKIPS</span><strong id="abstentionOperational">—</strong></div>
+          <div class="result-stat"><span>DECIDED SIGNALS</span><strong id="abstentionDecided">—</strong></div>
+          <div class="result-stat"><span>ABSTENTION SHARE</span><strong id="abstentionRatio">—</strong></div>
+        </div>
+        <div class="abstention-hours" id="abstentionHours" aria-label="Abstentions by UTC hour"></div>
+        <div class="abstention-columns">
+          <div><span class="abstention-heading">BY SESSION (UTC)</span><div class="abstention-session-list" id="abstentionSessions"></div></div>
+          <div><span class="abstention-heading">TOP REASONS</span><div class="abstention-reason-list" id="abstentionReasons"></div></div>
+        </div>
+        <p class="micro-copy">Every abstention is logged with its reason. The share compares gate abstentions with recorded BUY/SELL signals in the same window.</p>
+      </article>
       <article class="panel future-alternatives-panel">
         <div class="panel-heading"><div><div class="eyebrow small-eyebrow">PAIR CHOICE</div><h2>Liquidity order, not accuracy order</h2></div></div>
         <div class="future-alternative-list" id="futureAlternatives"></div>
@@ -395,6 +410,7 @@
           <label class="toggle-row" for="telegramAutoPost"><input type="checkbox" id="telegramAutoPost"><span><strong>AUTO-POST NEW AUTOMATIC SIGNALS</strong><small>Optional. Requires live provider data and a clear event calendar; a paper result follows after expiry.</small></span></label>
           <label class="toggle-row" for="telegramIncludeDemo"><input type="checkbox" id="telegramIncludeDemo"><span><strong>ALLOW SYNTHETIC DEMO TRANSMISSION</strong><small>Off by default. Demo rows are labelled as synthetic and are not market evidence.</small></span></label>
           <p class="micro-copy" id="telegramSendStatus" role="status">Configure the bot token and channel id on the server, then restart and test the connection.</p>
+          <p class="micro-copy" id="telegramLimitNote">Automatic posting stops at the daily cap and respects the cooldown. Manual sends count toward the cap.</p>
           <pre class="telegram-preview" id="telegramPreviewText" hidden></pre>
           <p class="micro-copy">Each signal is deduplicated by id. Re-sending the same id requires an explicit replay, so a double click cannot spam the channel.</p>
         </article>
@@ -412,6 +428,8 @@
             <div><span>CHANNEL ID</span><strong id="telegramChatState">NOT CONFIGURED</strong><small><code>ORBIX_TELEGRAM_CHAT_ID</code></small></div>
             <div><span>TIME LABEL</span><strong id="telegramTimezoneState">Asia/Kolkata</strong><small><code>ORBIX_TELEGRAM_TIMEZONE</code></small></div>
             <div><span>AUTO-POST DEFAULT</span><strong id="telegramAutoState">OFF</strong><small><code>ORBIX_TELEGRAM_AUTO_POST</code></small></div>
+            <div><span>DAILY MESSAGE CAP</span><strong id="telegramCapState">—</strong><small><code>ORBIX_TELEGRAM_DAILY_CAP</code> · resets 00:00 UTC</small></div>
+            <div><span>AUTO-POST COOLDOWN</span><strong id="telegramCooldownState">—</strong><small><code>ORBIX_TELEGRAM_COOLDOWN_SECONDS</code></small></div>
           </div>
           <p class="provider-security-note"><strong>Why the browser cannot send directly:</strong> Telegram bots need the token on every call. It stays on the server; the page only asks Orbix to send. A bot cannot read or trade your account, and no broker order is ever placed.</p>
           <p class="provider-security-note"><strong>Broker OTC symbols:</strong> posts use the pair loaded from Orbix’s own feed (for example <code>EUR/USD</code>). Broker-generated symbols such as <code>EURUSD-OTC</code> are not in that feed and are never relabelled to look like one.</p>
@@ -422,7 +440,7 @@
         <div class="history-table-wrap">
           <table class="history-table"><thead><tr><th>ENTRY</th><th>PAIR</th><th>DIRECTION</th><th>MODEL ESTIMATE</th><th>DELIVERY</th></tr></thead><tbody id="telegramLogRows"><tr><td colspan="5" class="empty-row">No automatic signals recorded yet.</td></tr></tbody></table>
         </div>
-        <p class="micro-copy">“QUEUED” means a signal exists but has not reached the channel. Synthetic demo signals are never auto-posted.</p>
+        <p class="micro-copy">“QUEUED” means a signal exists but has not reached the channel. Results edit the original message in place when it is still editable; otherwise they post as a new message. Synthetic demo signals are never auto-posted.</p>
       </article>
     </section>
 
@@ -434,6 +452,6 @@
     <p>Signal research only. Live feeds are optional/configured on the server. No Quotex login or real trades.</p>
     <span class="footer-right">BUILT FOR BETTER QUESTIONS</span>
   </footer>
-  <script src="/static/app.js?v=11" defer></script>
+  <script src="/static/app.js?v=12" defer></script>
 </body>
 </html>

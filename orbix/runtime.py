@@ -223,7 +223,22 @@ class Runtime:
                 signal = replace(signal, side="NO SIGNAL", reason=safety_filter_reason)
             if learning_model is not None and self.source == "IMPORTED CSV":
                 learning_model.save(self.model_path(pair))
-            self.ledger.record(signal, features, dataset_id=self.dataset_id())
+            active_dataset = self.dataset_id()
+            if signal.side == "NO SIGNAL":
+                # Abstentions are logged so restraint can be measured, but they
+                # never enter the paper signal or learning tables.
+                self.ledger.record_abstention(
+                    pair=pair,
+                    strategy=strategy_id,
+                    reason=signal.reason,
+                    kind="gate",
+                    entry_time=signal.entry_time,
+                    source=self.source,
+                    dataset_id=active_dataset,
+                    now=signal.generated_at,
+                )
+            else:
+                self.ledger.record(signal, features, dataset_id=active_dataset)
             return signal.to_dict()
 
     def learn_from_record(self, record: dict) -> dict:
@@ -313,8 +328,15 @@ class Runtime:
         summary["backtest_window"] = BACKTEST_WINDOW
         return summary
 
+    def abstention_summary(self, days: int = 7, limit: int = 25) -> dict:
+        return self.ledger.abstention_summary(days=days, limit=limit)
+
     def learning_summary(self) -> dict:
         summary = self.ledger.learning_summary()
+        try:
+            summary["abstentions"] = self.ledger.abstention_summary(days=7, limit=0)
+        except Exception:
+            summary["abstentions"] = None
         model = self.models.get(self.pair)
         if model is None and self.source == "IMPORTED CSV" and self._dataset_id:
             try:

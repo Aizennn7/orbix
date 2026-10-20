@@ -9,7 +9,7 @@ const ROUTES = {
   future: "Future",
   telegram: "Telegram channel",
 };
-const state = { market: null, strategies: null, lastSignal: null, route: "dashboard", providerKeys: [""], providerConfig: null, lastBacktestKey: null, backtestTimer: null, backtestRunning: false, automation: null, lastAutoSignalId: null, lastAutoCandleTimestamp: null, notificationsEnabled: false, toastTimer: null, telegram: null, telegramBusy: false, future: null, futureBusy: false };
+const state = { market: null, strategies: null, lastSignal: null, route: "dashboard", providerKeys: [""], providerConfig: null, lastBacktestKey: null, backtestTimer: null, backtestRunning: false, automation: null, lastAutoSignalId: null, lastAutoCandleTimestamp: null, notificationsEnabled: false, toastTimer: null, telegram: null, telegramBusy: false, future: null, futureBusy: false, abstentions: null };
 const $ = (selector) => document.querySelector(selector);
 
 async function api(path, options = {}) {
@@ -1002,6 +1002,9 @@ function startBlackholeAnimation() {
 }
 
 function telegramDeliveryLabel(signalId, data) {
+  const results = new Set(data?.sent_result_ids || []);
+  const edited = new Set(data?.edited_result_ids || []);
+  if (results.has(signalId)) return edited.has(signalId) ? "EDITED" : "RESULT";
   const sent = new Set(data?.sent_signal_ids || []);
   return sent.has(signalId) ? "SENT" : "QUEUED";
 }
@@ -1032,6 +1035,16 @@ function renderTelegramStatus(data) {
   if (timezoneState) timezoneState.textContent = data.timezone || "UTC";
   const autoState = $("#telegramAutoState");
   if (autoState) autoState.textContent = data.auto_post_enabled ? "ON" : "OFF";
+  const capState = $("#telegramCapState");
+  if (capState) capState.textContent = `${Number(data.sent_today || 0)} / ${Number(data.daily_cap || 0)} today`;
+  const cooldownState = $("#telegramCooldownState");
+  if (cooldownState) cooldownState.textContent = `${Number(data.cooldown_seconds || 0)} seconds`;
+  const limitNote = $("#telegramLimitNote");
+  if (limitNote) {
+    limitNote.textContent = data.auto_post_block_reason
+      ? `Automatic posting held: ${data.auto_post_block_reason}`
+      : `Automatic posting stops at ${data.daily_cap} messages/day and waits ${data.cooldown_seconds}s between posts. Manual sends count toward the cap.`;
+  }
   ["#telegramSendLatest", "#telegramSendBatch", "#telegramTest"].forEach((selector) => {
     const button = $(selector);
     if (button) button.disabled = !configured || state.telegramBusy;
@@ -1066,9 +1079,9 @@ function renderTelegramStatus(data) {
         probability.textContent = signal.probability_up == null ? "—" : `${(Number(signal.probability_up) * 100).toFixed(1)}%`;
         const delivery = document.createElement("td");
         const chip = document.createElement("span");
-        const delivered = telegramDeliveryLabel(signal.signal_id, data) === "SENT";
-        chip.className = `telegram-delivery-chip${delivered ? " is-sent" : ""}`;
-        chip.textContent = delivered ? "SENT" : "QUEUED";
+        const label = telegramDeliveryLabel(signal.signal_id, data);
+        chip.className = `telegram-delivery-chip${label === "QUEUED" ? "" : " is-sent"}`;
+        chip.textContent = label;
         delivery.append(chip);
         row.append(entry, pair, direction, probability, delivery);
         rows.append(row);
@@ -1182,6 +1195,96 @@ async function toggleTelegramAutoPost() {
     toggle.disabled = false;
     const status = $("#telegramSendStatus");
     if (status) status.textContent = error.message;
+  }
+}
+
+function renderAbstentions(data) {
+  state.abstentions = data;
+  const gate = Number(data.gate?.window || 0);
+  const operational = Number(data.operational?.window || 0);
+  const decided = Number(data.decided_signals_window || 0);
+  $("#abstentionWindow").textContent = `${data.window_days || 7} DAYS`;
+  $("#abstentionGate").textContent = gate.toLocaleString();
+  $("#abstentionOperational").textContent = operational.toLocaleString();
+  $("#abstentionDecided").textContent = decided.toLocaleString();
+  $("#abstentionRatio").textContent = data.abstention_ratio == null ? "—" : `${(Number(data.abstention_ratio) * 100).toFixed(0)}%`;
+
+  const hours = data.by_hour || [];
+  const max = Math.max(1, ...hours.map((entry) => Number(entry.gate || 0) + Number(entry.operational || 0)));
+  const hourWrap = $("#abstentionHours");
+  if (hourWrap) {
+    hourWrap.replaceChildren();
+    hours.forEach((entry) => {
+      const value = Number(entry.gate || 0) + Number(entry.operational || 0);
+      const column = document.createElement("div");
+      column.className = "abstention-hour";
+      column.title = `${String(entry.hour).padStart(2, "0")}:00 UTC · ${entry.gate} gate · ${entry.operational} operational`;
+      const bar = document.createElement("i");
+      bar.style.height = `${value ? Math.max(6, Math.round((value / max) * 100)) : 2}%`;
+      if (!value) bar.classList.add("is-empty");
+      column.append(bar);
+      hourWrap.append(column);
+    });
+  }
+
+  const outcomes = new Map((data.outcomes_by_session || []).map((item) => [item.session, item]));
+  const sessionWrap = $("#abstentionSessions");
+  if (sessionWrap) {
+    sessionWrap.replaceChildren();
+    const sessions = data.by_session || [];
+    if (!sessions.length) {
+      const empty = document.createElement("small");
+      empty.textContent = "No abstentions in this window.";
+      sessionWrap.append(empty);
+    }
+    sessions.forEach((entry) => {
+      const row = document.createElement("div");
+      row.className = "abstention-row";
+      const name = document.createElement("strong");
+      name.textContent = entry.session;
+      const count = document.createElement("span");
+      count.textContent = `${entry.gate} gate · ${entry.operational} skipped`;
+      const result = document.createElement("em");
+      const record = outcomes.get(entry.session);
+      result.textContent = record && record.decisive
+        ? `${record.wins}W–${record.losses}L`
+        : "no resolved paper trades";
+      row.append(name, count, result);
+      sessionWrap.append(row);
+    });
+  }
+
+  const reasonWrap = $("#abstentionReasons");
+  if (reasonWrap) {
+    reasonWrap.replaceChildren();
+    const reasons = (data.by_code || []).slice(0, 6);
+    if (!reasons.length) {
+      const empty = document.createElement("small");
+      empty.textContent = "No reasons logged yet.";
+      reasonWrap.append(empty);
+    }
+    reasons.forEach((entry) => {
+      const row = document.createElement("div");
+      row.className = "abstention-row abstention-reason";
+      const name = document.createElement("strong");
+      name.textContent = entry.label;
+      const count = document.createElement("span");
+      count.textContent = `${entry.count} · ${(Number(entry.share) * 100).toFixed(0)}%`;
+      const bar = document.createElement("i");
+      bar.style.width = `${Math.max(2, Math.round(Number(entry.share) * 100))}%`;
+      row.append(name, count, bar);
+      reasonWrap.append(row);
+    });
+  }
+}
+
+async function loadAbstentions() {
+  try {
+    const data = await api("/api/abstentions?days=7&limit=10");
+    renderAbstentions(data);
+  } catch (error) {
+    const sessionWrap = $("#abstentionSessions");
+    if (sessionWrap) sessionWrap.textContent = error.message;
   }
 }
 
@@ -1316,7 +1419,7 @@ async function loadFuturePlan() {
   const status = $("#futurePlanStatus");
   if (status) status.textContent = "Generating the single-pair plan…";
   try {
-    const plan = await api("/api/future/plan?count=6");
+    const [plan] = await Promise.all([api("/api/future/plan?count=6"), loadAbstentions()]);
     renderFuturePlan(plan);
   } catch (error) {
     if (status) status.textContent = error.message;
