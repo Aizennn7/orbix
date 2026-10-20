@@ -2,7 +2,38 @@
 
 This runs the **real app** on your phone: FastAPI, DuckDB, the scheduler, the paper ledger. Not a snapshot, not a remote website. Your data stays on the device and the server listens only on `127.0.0.1`, so nothing is reachable from your Wi-Fi or the internet.
 
-There is **no `.apk`**. Android cannot run Python directly, and DuckDB/NumPy only publish glibc ARM64 wheels, so plain Termux cannot install them. The app therefore runs inside a small Debian container managed by Termux, and you start it from a home-screen button instead of an app icon.
+There is an **APK**, but it does not contain Python — Android cannot run it, and DuckDB/NumPy only publish glibc ARM64 wheels. So the work is split in two:
+
+- the **APK** is the interface: the real dashboard, a bundled offline snapshot, and it switches to the live app whenever the local server is up;
+- **Termux** runs the engine: FastAPI, DuckDB, the scheduler, the ledger.
+
+Install the APK first — it works on its own immediately — then follow the rest of this guide when you want live signals.
+
+| | APK | Termux |
+|---|---|---|
+| Setup time | one minute | about half an hour |
+| Offline use | yes, bundled snapshot | yes, once installed |
+| Signals, scheduler, database | only while Termux runs the server | always |
+| Install | download and tap | F-Droid + this guide |
+
+
+---
+
+## Install the APK
+
+1. On the phone, open <https://github.com/Aizennn7/orbix/releases/tag/android-latest>.
+2. Download `orbix.apk`.
+3. Tap the file. Android warns about unknown sources — allow it for the browser or file manager you used.
+4. Open **Orbix**.
+
+The bar at the top always says which mode is active:
+
+- **LIVE · 127.0.0.1:8000** — Termux is running the server; you are using the real app.
+- **OFFLINE SNAPSHOT · no local server** — the bundled copy from the APK; read-only, works with no network.
+
+Tap **Reload** after starting Termux to switch to live. Links to brokers and other sites open in your normal browser.
+
+The APK is signed with a debug key. That is fine for sideloading your own build, but it cannot be uploaded to the Play Store without a release key.
 
 ---
 
@@ -165,6 +196,8 @@ The setting survives reboots. A factory reset or a major OS update can clear it.
 
 ## Part 5 — Make it feel like an app
 
+If you installed the APK you already have an icon and can skip this part. It is here for browser-only setups.
+
 ### Home-screen launcher
 
 1. Install **Termux:Widget** from F-Droid.
@@ -176,7 +209,7 @@ You now have a one-tap button. `orbix-stop` is in the same list.
 
 ### Add the dashboard itself
 
-With Orbix running, open `http://127.0.0.1:8000` in Chrome → **⋮** → **Add to Home screen**.
+Instead of the APK. With Orbix running, open `http://127.0.0.1:8000` in Chrome → **⋮** → **Add to Home screen**.
 
 That icon opens the dashboard full-screen, with no browser address bar. It only works while the server is running, so start the widget first if it does not load.
 
@@ -192,7 +225,7 @@ Everything the app does on a laptop works here. A short tour:
 
 | Area | What to expect |
 |---|---|
-| **Dashboard** | Same UI. Without a provider configured it shows **SYNTHETIC DEMO** data and says so in a banner. |
+| **Dashboard** | Same UI, in the APK and in the browser. Without a provider configured it shows **SYNTHETIC DEMO** data and says so in a banner. |
 | **Market data** | Add a Twelve Data key under *Connect providers*, or import a CSV. |
 | **CSV import** | Chrome's file picker works. Pick a file from Downloads; a year of M1 data is ~20 MB. |
 | **Signal engine** | Runs locally. Produces BUY / SELL / NO SIGNAL on closed candles. |
@@ -338,8 +371,8 @@ That deletes the container and **all data inside it**. Copy `/root/orbix-data` o
 
 ## FAQ
 
-**Why not an APK?**
-Packaging CPython plus a C++ analytical database for Android means cross-compiling DuckDB with the NDK and shipping a 300 MB+ app. It is weeks of fragile work versus a working setup today, and it would break every time DuckDB changes.
+**Why doesn't the APK contain Python?**
+Packaging CPython plus a C++ analytical database for Android means cross-compiling DuckDB with the NDK and shipping a 300 MB+ app. It is weeks of fragile work versus a working setup today, and it would break every time DuckDB changes. The APK therefore carries the interface and the snapshot, and talks to the Python server when you start it.
 
 **Does it trade for me?**
 No. It never places broker orders. Pocket Option remains a manual copy-ticket handoff, and `order_execution` is off by design.

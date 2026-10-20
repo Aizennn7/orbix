@@ -68,7 +68,21 @@ jobs:
           "$BUILD_TOOLS/aapt" dump badging "$APK" | head -12 > /tmp/badging.txt
           cat /tmp/badging.txt
           echo "--- bundled assets ---"
-          unzip -l "$APK" | grep -E "assets/index.html|assets/api-data/market.json|assets/app.js|classes.dex" || true
+          unzip -l "$APK" | grep " assets/" | awk '{print $1, $4}' > /tmp/assets.txt || true
+          head -25 /tmp/assets.txt
+          ASSET_COUNT="$(unzip -l "$APK" | grep -c " assets/")"
+          echo "asset files: $ASSET_COUNT"
+          if [ "$ASSET_COUNT" -lt 20 ]; then
+            echo "expected the docs/ snapshot inside the APK, found $ASSET_COUNT asset files"
+            exit 1
+          fi
+          for f in assets/index.html assets/app.js assets/styles.css assets/static-demo.css \
+                   assets/snapshot.json assets/api-data/market.json assets/api-data/preflight.json; do
+            unzip -l "$APK" | grep -q " $f$" || { echo "MISSING $f"; exit 1; }
+          done
+          { echo "asset files: $ASSET_COUNT"
+            echo "apk size: $(du -h "$APK" | cut -f1)"
+          } > /tmp/meta.txt
           cp "$APK" orbix.apk
           sha256sum orbix.apk | tee /tmp/sha.txt
 
@@ -111,6 +125,9 @@ jobs:
               echo '```'
               cat /tmp/badging.txt
               echo '```'
+            fi
+            if [ -s /tmp/meta.txt ]; then
+              sed 's/^/  /' /tmp/meta.txt
             fi
             if [ -s /tmp/sha.txt ]; then
               echo "sha256: \`$(cut -d' ' -f1 /tmp/sha.txt)\`"
