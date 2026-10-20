@@ -1,0 +1,636 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#050505">
+  <title>Dashboard — Orbix Signal Lab</title>
+  <link rel="stylesheet" href="/static/styles.css?v=24">
+</head>
+<body>
+  <div class="noise" aria-hidden="true"></div>
+  <header class="topbar shell">
+    <a class="brand" href="#dashboard" aria-label="Orbix Signal Lab dashboard">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 52 52" role="img">
+          <circle cx="26" cy="26" r="19" fill="none" stroke="currentColor" stroke-width="1.4"/>
+          <ellipse cx="26" cy="26" rx="23" ry="9" fill="none" stroke="currentColor" stroke-width="1" transform="rotate(-33 26 26)"/>
+          <path d="M18 34 34 13l-5 19-13 7 2-5Z" fill="currentColor"/>
+          <circle cx="34" cy="13" r="2" fill="#050505"/>
+        </svg>
+      </span>
+      <span class="brand-copy"><strong>ORBIX</strong><small>SIGNAL LAB</small></span>
+    </a>
+    <nav class="top-nav" aria-label="Main navigation">
+      <a href="#dashboard" data-route="dashboard" class="active" aria-current="page">Dashboard</a>
+      <a href="#engine" data-route="engine">Signal engine</a>
+      <a href="#backtest" data-route="backtest">Backtest</a>
+      <a href="#data" data-route="data">Data</a>
+      <a href="#connections" data-route="connections">Connections</a>
+      <a href="#paper" data-route="paper">Paper log</a>
+      <a href="#strategy-lab" data-route="strategy-lab">Strategy lab</a>
+      <a href="#future" data-route="future">Future</a>
+      <a href="#trader" data-route="trader">Trader</a>
+      <a href="#telegram" data-route="telegram">Telegram</a>
+    </nav>
+    <div class="top-status">
+      <span class="status-dot"></span><span id="sourceBadge">SYNTHETIC DEMO</span>
+      <span class="status-divider"></span><span class="top-status-muted">ORDERS OFF</span>
+      <button class="top-signout" id="signOutButton" type="button" hidden>SIGN OUT</button>
+    </div>
+  </header>
+
+  <section class="connection-strip shell" aria-label="Global data-provider connection status">
+    <span class="connection-indicator" id="connectionIndicator" aria-hidden="true"></span>
+    <div class="connection-summary"><span class="connection-kicker">DATA PROVIDER</span><strong id="connectionStatus" role="status" aria-live="polite">NOT CONNECTED</strong><span id="connectionDetail">No provider configured · synthetic demo active</span></div>
+    <div class="credit-dashboard" id="creditDashboard">
+      <button class="credit-trigger" id="creditDashboardTrigger" type="button" aria-controls="creditDashboardPopup" aria-expanded="false" aria-label="Show configured providers and their access status">
+        <span class="credit-trigger-label">API KEYS</span><strong id="creditTriggerCount">— / —</strong><span class="credit-chevron" aria-hidden="true">⌄</span>
+      </button>
+      <section class="credit-popup" id="creditDashboardPopup" aria-labelledby="creditPopupTitle" role="dialog" aria-modal="false" hidden>
+        <header class="credit-popup-header">
+          <div><div class="eyebrow small-eyebrow">PROVIDER ACCESS</div><h2 id="creditPopupTitle">API key status</h2></div>
+          <button class="credit-popup-close" id="creditPopupClose" type="button" aria-label="Close API credits popup">×</button>
+        </header>
+        <div class="credit-metrics">
+          <div class="credit-metric"><span>CONFIGURED</span><strong id="creditKeyCount">— / —</strong></div>
+          <div class="credit-metric"><span>ACCESSIBLE</span><strong id="creditUsed">—</strong></div>
+          <div class="credit-metric"><span>TOTAL</span><strong id="creditLimit">—</strong></div>
+        </div>
+        <p class="credit-popup-note" id="creditPopupNote">Provider quota data is unavailable until a provider-specific usage adapter is connected. No quota request is being made.</p>
+        <div class="credit-key-list" id="creditKeyRows" aria-live="polite"></div>
+        <a class="credit-manage-link" id="creditManageConnection" href="#connections" data-route="connections">MANAGE API KEYS ↗</a>
+      </section>
+    </div>
+  </section>
+
+  <section class="clock-strip shell" aria-label="Bot clock, server time, data time, and your local time">
+    <span class="clock-mode" id="botClockMode" data-mode="LIVE">BOT · LIVE</span>
+    <div class="clock-cell"><span>BOT CLOCK</span><strong id="botClockTime">—</strong></div>
+    <div class="clock-cell"><span>SERVER</span><strong id="botClockServer">—</strong></div>
+    <div class="clock-cell"><span>DATA</span><strong id="botClockData">—</strong></div>
+    <div class="clock-cell"><span>YOUR TIME</span><strong id="botClockLocal">—</strong></div>
+    <p class="clock-note" id="botClockNote">Bot timestamps are UTC. A historical imported file is labelled REPLAY with the exact gap.</p>
+  </section>
+
+  <section class="notice shell" id="feedNotice" role="status">
+    <span class="notice-icon">i</span>
+    <div id="feedNoticeText"><strong>Synthetic demo prices are active.</strong> No live FX feed is configured or connected, and no Quotex connection is present. Signals and test results are not real-market results.</div>
+    <button class="notice-dismiss" id="dismissNotice" aria-label="Dismiss notice">×</button>
+  </section>
+
+  <main class="shell app-main" id="appMain">
+    <section class="page-view is-active" id="page-dashboard" data-page="dashboard" aria-labelledby="dashboard-title">
+      <div class="hero">
+        <div class="hero-copy">
+          <div class="eyebrow"><span class="eyebrow-line"></span> ONE-MINUTE FX RESEARCH</div>
+          <h1 id="dashboard-title">Read the moment.<br><span>Wait for the signal.</span></h1>
+          <p>Orbix studies completed M1 candles and gives a clear BUY, SELL, or NO SIGNAL result. This build is for research and paper testing.</p>
+          <div class="hero-tags">
+            <span>01 / SIGNAL ONLY</span><span>02 / WALK-FORWARD TESTS</span><span>03 / LEARNING LOOP</span>
+          </div>
+        </div>
+        <div class="hero-art">
+          <canvas id="blackholeCanvas" aria-hidden="true"></canvas>
+          <span class="art-caption">THE QUIET<br>BEFORE THE MOVE</span>
+          <span class="art-index">O—01 / EVENT HORIZON</span>
+          <span class="sr-only">Decorative monochrome black hole animation.</span>
+        </div>
+      </div>
+
+      <div class="dashboard-grid">
+        <article class="panel chart-panel">
+          <div class="panel-heading">
+            <div>
+              <div class="eyebrow small-eyebrow">MARKET VIEW <span class="tiny-live"></span></div>
+              <h2><span id="pairTitle">EUR/USD</span> <span class="timeframe">· M1</span></h2>
+            </div>
+            <div class="chart-controls">
+              <label class="sr-only" for="pairSelect">Currency pair</label>
+              <select id="pairSelect" class="select-control">
+                <option>EUR/USD</option><option>GBP/USD</option><option>USD/JPY</option><option>AUD/USD</option><option>USD/INR</option>
+              </select>
+              <span class="time-pill">1 MIN</span>
+            </div>
+          </div>
+          <div class="price-row">
+            <div class="price-block"><span class="muted-label">LATEST CLOSE</span><strong id="latestPrice">—</strong></div>
+            <div class="price-meta"><span id="latestTime">Waiting for candles…</span><span class="source-note" id="marketSource">Synthetic sample</span></div>
+          </div>
+          <div class="chart-wrap"><canvas id="priceChart" aria-label="One-minute candle chart"></canvas><div class="chart-empty" id="chartEmpty">Loading price candles…</div></div>
+          <div class="chart-foot"><span><i class="legend-candle up"></i> UP CANDLE</span><span><i class="legend-candle down"></i> DOWN CANDLE</span><span class="chart-foot-right" id="chartRange">—</span></div>
+        </article>
+
+        <article class="panel snapshot-panel">
+          <div class="panel-heading">
+            <div><div class="eyebrow small-eyebrow">LATEST READ</div><h2>Signal snapshot</h2></div>
+            <span class="mode-tag">PAPER ONLY</span>
+          </div>
+          <div class="snapshot-read">
+            <div class="snapshot-glyph" id="dashboardSignalGlyph">◌</div>
+            <div class="snapshot-copy"><span class="muted-label" id="dashboardSignalPair">EUR/USD · M1</span><strong id="dashboardSignalSide">READY</strong><span id="dashboardSignalReason">Generate a signal to see the latest read.</span></div>
+          </div>
+          <div class="snapshot-time"><span>ENTRY TIME</span><strong id="dashboardSignalTimestamp">No signal yet</strong></div>
+          <a class="button button-secondary snapshot-button" href="#engine" data-route="engine">OPEN SIGNAL ENGINE <span class="button-arrow">↗</span></a>
+          <p class="micro-copy">NO SIGNAL is a valid outcome. Orbix never places broker orders.</p>
+        </article>
+      </div>
+
+      <section class="metrics-grid" aria-label="Research status">
+        <article class="metric-card"><span class="metric-kicker">DATA WINDOW</span><strong id="candleCount">—</strong><small>completed M1 candles</small><span class="metric-mark">01</span></article>
+        <article class="metric-card"><span class="metric-kicker">ACTIVE PROTOTYPES</span><strong>05</strong><small>signal methods ready to test</small><span class="metric-mark">02</span></article>
+        <article class="metric-card"><span class="metric-kicker">RESEARCH CANDIDATES</span><strong>30</strong><small>ideas catalogued, not all coded</small><span class="metric-mark">03</span></article>
+        <article class="metric-card"><span class="metric-kicker">TRADE EXECUTION</span><strong>OFF</strong><small>signals only · no broker orders</small><span class="metric-mark">04</span></article>
+      </section>
+
+      <section class="route-card-grid" aria-label="Research pages">
+        <a class="route-card" href="#backtest" data-route="backtest"><span class="route-card-number">01</span><strong>Test an idea</strong><small>Walk-forward paper results</small><span class="route-card-arrow">↗</span></a>
+        <a class="route-card" href="#data" data-route="data"><span class="route-card-number">02</span><strong>Bring your data</strong><small>Import M1 candle history</small><span class="route-card-arrow">↗</span></a>
+        <a class="route-card" href="#strategy-lab" data-route="strategy-lab"><span class="route-card-number">03</span><strong>Explore strategies</strong><small>Five prototypes · 30 ideas</small><span class="route-card-arrow">↗</span></a>
+        <a class="route-card" href="#future" data-route="future"><span class="route-card-number">04</span><strong>Future focus</strong><small>One pair · next windows</small><span class="route-card-arrow">↗</span></a>
+        <a class="route-card" href="#telegram" data-route="telegram"><span class="route-card-number">05</span><strong>Send to Telegram</strong><small>One channel · one click</small><span class="route-card-arrow">↗</span></a>
+      </section>
+    </section>
+
+    <section class="page-view" id="page-engine" data-page="engine" aria-labelledby="engine-title" hidden>
+      <header class="page-heading">
+        <div><div class="eyebrow"><span class="eyebrow-line"></span> DECISION WORKSPACE</div><h1 id="engine-title">Signal engine</h1><p>Generate research signals from completed candles. Each signal is timestamped for the next minute boundary, one minute before its default prediction expiry.</p></div>
+        <div class="blackhole-mini" aria-hidden="true"><i class="mini-ring ring-one"></i><i class="mini-ring ring-two"></i><b></b></div>
+      </header>
+      <div class="engine-layout">
+        <article class="panel signal-panel">
+          <div class="panel-heading">
+            <div><div class="eyebrow small-eyebrow">PREDICTION ENGINE</div><h2>Signal output <span class="small-pair" id="enginePairLabel">EUR/USD · M1</span></h2></div>
+            <span class="mode-tag">PAPER</span>
+          </div>
+          <label class="field-label" for="strategySelect">Backtest method</label>
+          <select id="strategySelect" class="select-control full-width"><option value="orbix_confluence">Orbix Confluence Gate</option><option value="ml_consensus">Orbix ML + trend agreement</option><option value="orbix_cadence">Orbix Cadence Read (3-min collection)</option></select>
+          <div class="signal-result" id="signalResult">
+            <div class="signal-glyph" id="signalGlyph">◌</div>
+            <div class="signal-copy"><span class="muted-label">CURRENT READ</span><span class="signal-headline" id="signalHeadline">ORAC V1 · WAITING</span><strong id="signalSide">READY</strong><span id="signalReason">Generate a signal to see the result.</span></div>
+          </div>
+          <div class="signal-details">
+            <div><span>ENTRY TIME (UTC)</span><strong id="entryTime">—</strong></div>
+            <div><span>GENERATED AT (UTC)</span><strong id="generatedTime">—</strong></div>
+            <div><span>PREDICTION / EXPIRY (UTC)</span><strong id="expiryTime">—</strong></div>
+            <div><span>MODEL / RULE</span><strong id="modelScore">—</strong></div>
+          </div>
+          <div class="automation-panel" aria-live="polite">
+            <div class="automation-copy"><span>AUTOMATIC M1 SIGNALS</span><strong id="autoSignalState">WAITING FOR PROVIDERS</strong><small id="autoSignalDetail">Requires server-configured market and event-calendar providers.</small></div>
+            <button class="button button-secondary notification-button" id="enableNotifications" type="button">ENABLE ALERTS</button>
+          </div>
+          <div class="news-panel" aria-live="polite">
+            <div class="news-panel-heading"><span>HIGH-IMPACT NEWS GUARD</span><strong id="newsGuardState">UNKNOWN</strong></div>
+            <p id="newsGuardDetail">No fresh event calendar is connected; automatic signals remain paused.</p>
+            <div id="upcomingEvents" class="upcoming-events"></div>
+          </div>
+          <button class="button button-primary generate-button" id="generateButton"><span>TEST ALL STRATEGIES</span><span class="button-arrow">↗</span></button>
+          <p class="micro-copy">The scan tests all six executable methods on the same closed candle and records only the strictest qualified read. The selector above drives the walk-forward backtest. A rule set is not a sureshot; model probabilities are calibrated only after enough resolved outcomes exist, and calibration describes the past.</p>
+        </article>
+        <aside class="panel engine-notes">
+          <div class="eyebrow small-eyebrow">HOW TO READ IT</div><h2>Signal, not autopilot.</h2>
+          <p class="panel-intro">The engine only uses closed M1 candles. Every bot timestamp is UTC and shown above against server, data, and local time. In replay the generated time follows the imported candle instead of today’s clock. Provider-late signals are skipped rather than backdated.</p>
+          <div class="note-step"><span>01</span><p><strong>Entry time</strong><br>Next M1 boundary after the latest completed candle. Automated entries more than 10 seconds late are discarded.</p></div>
+          <div class="note-step"><span>02</span><p><strong>Generated at</strong><br>Actual server generation time; data-feed latency is shown in the lead to expiry.</p></div>
+          <div class="note-step"><span>03</span><p><strong>Prediction / expiry</strong><br>Exactly one M1 candle after entry for the default horizon. The outcome is scored only after its close.</p></div>
+          <a class="text-button inline-link" href="#dashboard" data-route="dashboard">CHANGE PAIR ON DASHBOARD ↗</a>
+        </aside>
+      </div>
+      <article class="panel strategy-scan-panel">
+        <div class="panel-heading">
+          <div><div class="eyebrow small-eyebrow">ALL METHODS · ONE CLICK</div><h2>Strategy scan</h2></div>
+          <span class="mode-tag" id="scanSummary">NOT RUN</span>
+        </div>
+        <div class="history-table-wrap">
+          <table class="history-table">
+            <thead><tr><th>METHOD</th><th>SIDE</th><th>GRADE</th><th>MODEL</th><th>WHY</th></tr></thead>
+            <tbody id="scanRows"><tr><td colspan="5" class="empty-row">Test all strategies to compare every method on the latest closed candle.</td></tr></tbody>
+          </table>
+        </div>
+        <p class="micro-copy" id="scanNote">Every executable method is evaluated on the same candle with the same model and ensemble. The scan itself writes nothing; only the best qualified read is recorded as a paper signal. The strictest confirmed method wins a tie, so the loose cadence read cannot outrank a rule-confirmed setup.</p>
+      </article>
+      <article class="panel handoff-panel" id="brokerHandoff">
+        <div class="panel-heading">
+          <div><div class="eyebrow small-eyebrow">BROKER HANDOFF · MANUAL ONLY</div><h2>Pocket Option</h2></div>
+          <span class="mode-tag" id="handoffMode">NO SIGNAL</span>
+        </div>
+        <div class="handoff-layout">
+          <div class="handoff-ticket">
+            <div class="ticket-row"><span>ASSET</span><strong id="handoffAsset">—</strong></div>
+            <div class="ticket-row"><span>DIRECTION</span><strong id="handoffDirection">—</strong></div>
+            <div class="ticket-row"><span>EXPIRY</span><strong id="handoffExpiry">—</strong></div>
+            <div class="ticket-row"><span>ENTRY (UTC)</span><strong id="handoffEntry">—</strong></div>
+          </div>
+          <div class="handoff-copy">
+            <p class="panel-intro" id="handoffNote">Generate or scan a signal to build a copyable ticket. Orbix never places the trade.</p>
+            <div class="handoff-actions">
+              <button class="button button-secondary" id="copyTicket" type="button" disabled>COPY TICKET</button>
+              <a class="button button-secondary" href="https://pocketoption.com/" target="_blank" rel="noopener noreferrer">OPEN POCKET OPTION ↗</a>
+            </div>
+          </div>
+        </div>
+        <p class="micro-copy">Manual execution only. Pocket Option has no official public trading API, so Orbix does not log in, store a session cookie, or send orders; unofficial automation would break the broker's terms. Binary options can expire worthless, and speculative trading is restricted for residents of some countries, including India. Check what you are allowed to trade.</p>
+      </article>
+      <article class="panel model-lab-panel" aria-labelledby="modelLabTitle">
+        <div class="panel-heading">
+          <div><div class="eyebrow small-eyebrow">PREDICTION + SELF-LEARNING</div><h2 id="modelLabTitle">Model calibration &amp; drift</h2></div>
+          <span class="mode-tag" id="modelVersionTag">NO VERSION</span>
+        </div>
+        <div class="future-evidence-grid model-grid">
+          <div class="result-stat"><span>FEATURE SET</span><strong id="modelFeatureVersion">—</strong></div>
+          <div class="result-stat"><span>PRODUCTION READ</span><strong id="modelProbability">—</strong></div>
+          <div class="result-stat"><span>RAW SCORE</span><strong id="modelRawProbability">—</strong></div>
+          <div class="result-stat"><span>CALIBRATION</span><strong id="modelCalibrationState">—</strong></div>
+          <div class="result-stat"><span>ENSEMBLE SPREAD</span><strong id="modelUncertainty">—</strong></div>
+          <div class="result-stat"><span>DRIFT STATE</span><strong id="modelDriftState">—</strong></div>
+        </div>
+        <div class="model-columns">
+          <div>
+            <span class="abstention-heading">TOP CONTRIBUTIONS · LATEST BAR</span>
+            <div class="contribution-list" id="modelContributions"><p class="dataset-empty">Train a model to see its drivers.</p></div>
+          </div>
+          <div>
+            <span class="abstention-heading">MODEL SNAPSHOTS</span>
+            <div class="model-version-list" id="modelVersions"><p class="dataset-empty">No validated version yet.</p></div>
+            <span class="abstention-heading">PER-STRATEGY RECORD</span>
+            <div class="model-strategy-list" id="modelStrategies"><p class="dataset-empty">No resolved imported outcomes yet.</p></div>
+          </div>
+        </div>
+        <div class="model-audit">
+          <div>
+            <span class="abstention-heading">RELIABILITY · RECENT RESOLVED OUTCOMES</span>
+            <div class="reliability-list" id="modelReliability"><p class="dataset-empty">Resolve imported outcomes to see a reliability curve.</p></div>
+          </div>
+          <div>
+            <span class="abstention-heading">LEARNING ACTIVITY · THIS SESSION</span>
+            <div class="learning-log" id="modelLearningLog"><p class="dataset-empty">No guarded rejections or calibration changes yet.</p></div>
+            <p class="micro-copy" id="modelLearningCounts"></p>
+            <p class="micro-copy" id="modelShadow"></p>
+            <p class="micro-copy" id="modelDataset"></p>
+          </div>
+        </div>
+        <div class="model-actions">
+          <button class="button button-secondary" id="refreshModel" type="button">REFRESH</button>
+          <button class="button button-secondary" id="retrainModel" type="button">RETRAIN + VALIDATE</button>
+          <button class="button button-secondary" id="rollbackModel" type="button">ROLL BACK ONE VERSION</button>
+          <button class="button button-secondary" id="preflightModel" type="button">LIVE PREFLIGHT</button>
+          <span id="modelActionStatus" class="model-action-status"></span>
+        </div>
+        <div class="preflight-panel" id="preflightPanel" hidden>
+          <div id="preflightSummary" class="preflight-summary"></div>
+          <div id="preflightChecks"></div>
+          <p class="micro-copy" id="preflightNote"></p>
+        </div>
+        <p class="micro-copy" id="modelLabNote">A held-out validation gate decides whether a retrained model replaces the champion. Calibration is refitted only from resolved imported-data outcomes; demo outcomes never train it.</p>
+      </article>
+    </section>
+
+    <section class="page-view" id="page-backtest" data-page="backtest" aria-labelledby="backtest-title" hidden>
+      <header class="page-heading">
+        <div><div class="eyebrow"><span class="eyebrow-line"></span> CHRONOLOGICAL EVALUATION</div><h1 id="backtest-title">Walk-forward testing</h1><p>Orbix automatically tests imported M1 history on later unseen candles when the data, strategy, or payout changes. The assumed payout is not fetched from a broker.</p></div>
+        <div class="blackhole-mini" aria-hidden="true"><i class="mini-ring ring-one"></i><i class="mini-ring ring-two"></i><b></b></div>
+      </header>
+      <article class="panel backtest-panel">
+        <div class="panel-heading">
+          <div><div class="eyebrow small-eyebrow">HISTORICAL CHECK <span class="small-pair" id="backtestPairLabel">EUR/USD · M1</span></div><h2>Walk-forward paper test</h2></div>
+          <span class="mode-tag">NO REAL MONEY</span>
+        </div>
+        <p class="panel-intro">Walk-forward testing runs automatically after import or dataset/strategy/payout changes. It trains on earlier candles, tests on later candles, and updates only after outcomes mature. Use the button to rerun; synthetic demo data is excluded from automatic accuracy reports.</p>
+        <div class="test-controls">
+          <div class="payout-control"><label class="field-label" for="payoutInput">Assumed winning payout</label><div class="input-suffix"><input id="payoutInput" type="number" min="1" max="100" value="80"><span>%</span></div></div>
+          <button class="button button-secondary" id="backtestButton"><span>RUN WALK-FORWARD TEST</span><span class="button-arrow">↗</span></button>
+        </div>
+        <div class="backtest-results" id="backtestResults">
+          <div class="result-stat"><span>SIGNALS</span><strong id="btSignals">—</strong></div>
+          <div class="result-stat"><span>WIN RATE</span><strong id="btWinRate">—</strong></div>
+          <div class="result-stat"><span>NET UNITS</span><strong id="btNet">—</strong></div>
+          <div class="result-stat"><span>BREAK-EVEN RATE</span><strong id="btBreakEven">—</strong></div>
+        </div>
+        <p class="micro-copy" id="backtestNote">Automatic walk-forward testing requires imported M1 history. Synthetic demo candles are not used for automatic accuracy reports.</p>
+      </article>
+      <div class="page-footnote"><span class="footnote-mark">!</span><p>Historical dry-run only. Win rates and assumed payout do not predict future performance; synthetic demo candles are artificial.</p></div>
+    </section>
+
+    <section class="page-view" id="page-data" data-page="data" aria-labelledby="data-title" hidden>
+      <header class="page-heading">
+          <div><div class="eyebrow"><span class="eyebrow-line"></span> MARKET HISTORY</div><h1 id="data-title">Data workspace</h1><p>Upload large completed M1 histories to the local archive. Orbix streams files in chunks and keeps only a small recent window in memory.</p></div>
+        <div class="blackhole-mini" aria-hidden="true"><i class="mini-ring ring-one"></i><i class="mini-ring ring-two"></i><b></b></div>
+      </header>
+      <div class="data-layout">
+        <article class="panel import-panel">
+          <div class="panel-heading">
+            <div><div class="eyebrow small-eyebrow">YOUR PRICE HISTORY</div><h2>Import M1 candles</h2></div>
+            <span class="upload-icon">⇧</span>
+          </div>
+          <p class="panel-intro">Upload M1 OHLCV CSV: <code>timestamp, open, high, low, close, volume</code>. Use UTC ISO-8601 candle-open times and at least 120 completed candles. The server streams files up to 1 GB into local storage.</p>
+          <label class="upload-drop" for="csvFile"><span class="upload-plus">＋</span><span><strong>Choose a CSV file</strong><small>At least 120 completed candles · 1 GB max</small></span><input type="file" id="csvFile" accept=".csv,text/csv"></label>
+          <div class="import-status" id="importStatus">No file selected</div>
+          <div class="data-actions"><button class="text-button" id="resetDemoButton">Return to demo data <span>↗</span></button><span class="small-pair" id="importPairLabel">Selected pair: EUR/USD</span></div>
+        </article>
+        <aside class="panel data-guide">
+          <div class="eyebrow small-eyebrow">FILE CHECKLIST</div><h2>Clean inputs matter.</h2>
+          <ul class="check-list">
+            <li>One row per completed one-minute candle.</li>
+            <li>Timestamps in ascending order; UTC is recommended.</li>
+            <li>Each row needs open, high, low, and close.</li>
+            <li>New imports are archived; earlier datasets are retained.</li>
+          </ul>
+          <div class="storage-card">
+            <div class="storage-card-heading"><span>LOCAL CANDLE ARCHIVE</span><button class="text-button" id="refreshStorage">REFRESH ↻</button></div>
+            <div class="storage-stat-grid">
+              <div><span>DATASETS</span><strong id="storageDatasetCount">—</strong></div>
+              <div><span>STORED CANDLES</span><strong id="storageCandleCount">—</strong></div>
+              <div><span>FILE SIZE</span><strong id="storageFileSize">—</strong></div>
+              <div><span>HOT WINDOW</span><strong id="storageHotWindow">—</strong></div>
+            </div>
+            <p id="storageArchiveNote"><code>data/candles.duckdb</code> · old CSV imports remain archived after switching to demo.</p>
+            <div class="dataset-history" id="datasetHistory" aria-label="Archived candle datasets"><p class="dataset-empty">No imported datasets archived yet.</p></div>
+          </div>
+          <div class="learning-card">
+            <div class="eyebrow small-eyebrow">OUTCOME LEARNING</div>
+            <div class="learning-stat-line"><strong id="learningUpdateCount">0</strong><span>online updates</span><strong id="learningAccuracy">—</strong><span>pre-update direction accuracy</span></div>
+            <p id="learningNote">Imported-data outcomes update the model only after a confirmed expiry price or matching completed candle arrives. Demo data never trains it.</p>
+            <small>Append completed M1 bars through <code>POST /api/candles/append</code> to auto-resolve matching expired paper signals.</small>
+          </div>
+          <div class="guide-warning"><strong>Automatic feed is optional</strong><span>Save the Twelve Data key in the Connections page. Orbix refreshes completed M1 bars every 60 seconds and event data every 15 minutes; it will not overwrite an active manual CSV unless you explicitly sync the provider.</span></div>
+          <a class="text-button inline-link" href="#dashboard" data-route="dashboard">SELECT PAIR ON DASHBOARD ↗</a>
+        </aside>
+      </div>
+    </section>
+
+    <section class="page-view" id="page-connections" data-page="connections" aria-labelledby="connections-title" hidden>
+      <header class="page-heading">
+        <div><div class="eyebrow"><span class="eyebrow-line"></span> PROVIDER SETUP</div><h1 id="connections-title">Data connections</h1><p>Save provider credentials here. Orbix stores them on this server, applies them to the running service without a restart, and shows whether each provider accepts them.</p></div>
+        <div class="blackhole-mini" aria-hidden="true"><i class="mini-ring ring-one"></i><i class="mini-ring ring-two"></i><b></b></div>
+      </header>
+      <div class="connection-layout">
+        <article class="panel provider-form-panel">
+          <div class="panel-heading"><div><div class="eyebrow small-eyebrow">SERVER-SAVED CREDENTIALS</div><h2>Connect providers</h2></div><span class="mode-tag" id="providerPanelTag">NOT CONNECTED</span></div>
+          <p class="panel-intro">Enter each credential once. It is written to a server-local file readable only by the server user (mode 600, unencrypted at rest), applied to the live service immediately, and read back only as a mask. The full value never returns to this page.</p>
+          <div class="provider-credential-list">
+            <div class="provider-credential" data-provider="market">
+              <div class="provider-credential-head"><span>MARKET DATA · TWELVE DATA</span><strong id="marketCredentialState">NOT CONNECTED</strong></div>
+              <label class="field-label" for="twelveDataKey">API KEY</label>
+              <input class="provider-input" id="twelveDataKey" type="password" placeholder="Paste the Twelve Data API key" autocomplete="new-password" autocapitalize="off" spellcheck="false">
+              <small id="marketCredentialNote">Used for completed M1 candles. Without it the live feed stays off; imported CSV data still works.</small>
+            </div>
+            <div class="provider-credential" data-provider="calendar">
+              <div class="provider-credential-head"><span>ECONOMIC CALENDAR · FINNHUB</span><strong id="calendarCredentialState">NOT CONNECTED</strong></div>
+              <label class="field-label" for="finnhubKey">API KEY</label>
+              <input class="provider-input" id="finnhubKey" type="password" placeholder="Paste the Finnhub API key" autocomplete="new-password" autocapitalize="off" spellcheck="false">
+              <small id="calendarCredentialNote">Used to pause signals around high-impact events. Calendar access may require a paid Finnhub plan.</small>
+            </div>
+            <div class="provider-credential" data-provider="telegram">
+              <div class="provider-credential-head"><span>TELEGRAM PUBLISHING</span><strong id="telegramCredentialState">NOT CONNECTED</strong></div>
+              <label class="field-label" for="telegramBotToken">BOT TOKEN</label>
+              <input class="provider-input" id="telegramBotToken" type="password" placeholder="Paste the bot token from BotFather" autocomplete="new-password" autocapitalize="off" spellcheck="false">
+              <label class="field-label" for="telegramChatId">TARGET CHANNEL / CHAT ID</label>
+              <input class="provider-input" id="telegramChatId" type="text" placeholder="e.g. -1001234567890" autocomplete="off" spellcheck="false">
+              <small id="telegramCredentialNote">The bot must be an administrator of the channel with permission to post messages.</small>
+            </div>
+          </div>
+          <div class="provider-actions">
+            <button class="button button-primary" id="saveProviderButton" type="button">SAVE &amp; APPLY <span class="button-arrow">↗</span></button>
+            <button class="button button-secondary" id="testProviderButton" type="button"><span>TEST ACCESS</span><span class="button-arrow">↻</span></button>
+            <button class="text-button" id="clearProviderButton" type="button">CLEAR SAVED KEYS</button>
+          </div>
+          <p class="micro-copy" id="providerFormStatus" role="status">No credentials saved on this server yet. Server environment variables, when present, take precedence.</p>
+          <details class="env-guide">
+            <summary class="field-label">SERVER ENVIRONMENT FALLBACK</summary>
+            <pre class="env-snippet">ORBIX_TWELVE_DATA_API_KEY=your_key
+ORBIX_FINNHUB_API_KEY=your_key
+ORBIX_TELEGRAM_BOT_TOKEN=your_bot_token
+ORBIX_TELEGRAM_CHAT_ID=-100...</pre>
+            <p class="micro-copy">A root <code>.env</code> beside <code>pyproject.toml</code> is loaded at server start; exported shell or Docker variables win, and <code>ORBIX_ENV_FILE</code> selects another file. Environment keys cannot be replaced from this page. The file is ignored by Git — never commit or share it.</p>
+          </details>
+        </article>
+        <aside class="panel provider-status-panel">
+          <div class="eyebrow small-eyebrow">SERVER-SIDE AUTOMATION</div>
+          <div class="provider-state-card"><span class="connection-indicator" id="providerStatusIndicator" aria-hidden="true"></span><div><span class="muted-label">AUTO SIGNAL STATE</span><strong id="providerPageState">WAITING FOR PROVIDERS</strong></div></div>
+          <p class="panel-intro" id="providerPageMessage">Add provider credentials to the server environment, then sync the feed here.</p>
+          <div class="server-provider-list">
+            <div><span>MARKET DATA · TWELVE DATA</span><strong id="marketFeedState">NOT CONFIGURED</strong><small id="marketFeedMessage">Set ORBIX_TWELVE_DATA_API_KEY.</small></div>
+            <div><span>ECONOMIC CALENDAR · FINNHUB</span><strong id="calendarFeedState">NOT CONFIGURED</strong><small id="calendarFeedMessage">Set ORBIX_FINNHUB_API_KEY; calendar access may require a paid plan.</small></div>
+            <div><span>TELEGRAM · SIGNAL PUBLISHING</span><strong id="telegramFeedState">NOT CONFIGURED</strong><small id="telegramFeedMessage">Save a bot token and channel id to enable posting.</small></div>
+          </div>
+          <div class="server-provider-actions">
+            <button class="button button-primary" id="syncLiveFeedButton" type="button">SYNC / ACTIVATE LIVE FEED <span class="button-arrow">↗</span></button>
+            <button class="button button-secondary" id="refreshCalendarButton" type="button"><span>REFRESH EVENT CALENDAR</span><span class="button-arrow">↻</span></button>
+          </div>
+          <p class="provider-security-note"><strong>Safe defaults:</strong> provider data is appended only to its own active dataset; manual CSV history is never silently overwritten. High-impact events pause automatic signals instead of guessing a news direction.</p>
+        </aside>
+      </div>
+    </section>
+
+    <section class="page-view" id="page-paper" data-page="paper" aria-labelledby="paper-title" hidden>
+      <header class="page-heading">
+        <div><div class="eyebrow"><span class="eyebrow-line"></span> PAPER OUTCOME TRACKING</div><h1 id="paper-title">Paper log</h1><p>Review BUY/SELL signals by their entry time and prediction expiry. Matching completed candles can auto-resolve imported-data outcomes; manual exit-price entry remains available.</p></div>
+        <div class="blackhole-mini" aria-hidden="true"><i class="mini-ring ring-one"></i><i class="mini-ring ring-two"></i><b></b></div>
+      </header>
+      <article class="panel history-panel">
+        <div class="panel-heading"><div><div class="eyebrow small-eyebrow">SIGNAL HISTORY</div><h2>Recent signals</h2></div><button class="text-button" id="refreshHistory">REFRESH ↻</button></div>
+        <div class="history-table-wrap">
+          <table class="history-table"><thead><tr><th>PAIR</th><th>METHOD</th><th>READ</th><th>ENTRY TIME</th><th>PREDICTION TIME</th><th>STATUS</th><th>PAPER EXIT PRICE</th></tr></thead><tbody id="historyRows"><tr><td colspan="7" class="empty-row">No generated signals yet.</td></tr></tbody></table>
+        </div>
+        <p class="micro-copy">Confirmed imported-data losses feed the online model once after expiry. This can improve later forecasts but cannot guarantee the same error will never recur; ties and synthetic data are excluded.</p>
+        <p class="micro-copy" id="paperLogStatus" role="status"></p>
+      </article>
+      <div class="page-footnote"><span class="footnote-mark">i</span><p>Synthetic demo outcomes are marked DEMO ONLY and never train the model. Imported outcomes stay tied to their persistent dataset stream and are learned at most once.</p></div>
+    </section>
+
+    <section class="page-view" id="page-strategy-lab" data-page="strategy-lab" aria-labelledby="strategy-title" hidden>
+      <header class="page-heading">
+        <div><div class="eyebrow"><span class="eyebrow-line"></span> RESEARCH QUEUE</div><h1 id="strategy-title">Strategy lab <span class="count-badge">30</span></h1><p>Five transparent prototypes can be run now, including Orbix’s original confluence rule set. The rest are research ideas—not claims of profitability.</p></div>
+        <div class="blackhole-mini" aria-hidden="true"><i class="mini-ring ring-one"></i><i class="mini-ring ring-two"></i><b></b></div>
+      </header>
+      <article class="panel lab-panel">
+        <div class="panel-heading"><div><div class="eyebrow small-eyebrow">EXECUTABLE RULES</div><h2>Prototype methods</h2></div><button class="collapse-button" id="toggleCatalog" aria-expanded="false">SHOW ALL 30 <span>＋</span></button></div>
+        <p class="panel-intro">Trend-pullback and range-reversal entries are approximate prototypes. The 20-candle breakout does not require a retest, so “breakout and retest” remains research-only.</p>
+        <div class="prototype-list" id="prototypeList"></div>
+        <div class="catalog-list" id="catalogList" hidden></div>
+      </article>
+    </section>
+
+    <section class="page-view" id="page-future" data-page="future" aria-labelledby="future-title" hidden>
+      <header class="page-heading">
+        <div><div class="eyebrow"><span class="eyebrow-line"></span> SINGLE-PAIR FOCUS</div><h1 id="future-title">Future</h1><p>One pair at a time: the upcoming minute boundaries, the live readiness gate, and a replay of the most recent closed bars. No direction is invented for a candle that has not closed.</p></div>
+        <div class="blackhole-mini" aria-hidden="true"><i class="mini-ring ring-one"></i><i class="mini-ring ring-two"></i><b></b></div>
+      </header>
+      <div class="future-layout">
+        <article class="panel future-focus-panel">
+          <div class="panel-heading"><div><div class="eyebrow small-eyebrow">FOCUS PAIR</div><h2 id="futurePair">EUR/USD</h2></div><button class="text-button" id="futureRefresh">REFRESH PLAN ↻</button></div>
+          <p class="panel-intro" id="futureWhy">Loading the single-pair plan…</p>
+          <div class="future-focus-grid">
+            <div><span>LIQUIDITY RANK</span><strong id="futureLiquidityRank">—</strong></div>
+            <div><span>DATA SOURCE</span><strong id="futureDataSource">—</strong></div>
+            <div><span>CANDLES</span><strong id="futureCandleCount">—</strong></div>
+            <div><span>PLAN STATE</span><strong id="futureReadyState">—</strong></div>
+          </div>
+          <p class="micro-copy" id="futureAccuracyNote">No pair has a higher directional hit rate because it is more liquid. Liquidity changes the cost, not the probability.</p>
+          <div class="future-blocked" id="futureBlocked" hidden><strong>WINDOWS BLOCKED</strong><ul id="futureBlockedReasons"></ul></div>
+          <p class="micro-copy" id="futurePlanStatus" role="status"></p>
+        </article>
+        <aside class="panel future-evidence-panel">
+          <div class="eyebrow small-eyebrow">WALK-FORWARD EVIDENCE</div>
+          <div class="future-evidence-grid">
+            <div class="result-stat"><span>HIT RATE</span><strong id="futureHitRate">—</strong></div>
+            <div class="result-stat"><span>95% INTERVAL</span><strong id="futureHitInterval">—</strong></div>
+            <div class="result-stat"><span>SIGNALS</span><strong id="futureSignals">—</strong></div>
+            <div class="result-stat"><span>BREAK-EVEN</span><strong id="futureBreakEven">—</strong></div>
+          </div>
+          <p class="micro-copy" id="futureEvidenceNote">Evidence appears after the plan is generated.</p>
+        </aside>
+      </div>
+      <article class="panel future-windows-panel">
+        <div class="panel-heading"><div><div class="eyebrow small-eyebrow">UPCOMING MINUTE BOUNDARIES</div><h2>Armed windows</h2></div><span class="mode-tag" id="futureWindowCount">—</span></div>
+        <div class="future-window-grid" id="futureWindowGrid"></div>
+        <p class="micro-copy">A direction is filled in only after the previous candle closes and the gate runs. Pre-announcing a direction for an unclosed candle would be a guess, not a signal.</p>
+      </article>
+      <article class="panel future-replay-panel">
+        <div class="panel-heading"><div><div class="eyebrow small-eyebrow">RECENT CLOSED BARS</div><h2>Gate replay</h2></div><span class="mode-tag" id="futureReplayCount">—</span></div>
+        <div class="history-table-wrap">
+          <table class="history-table"><thead><tr><th>ENTRY TIME</th><th>PREDICTION</th><th>DIRECTION</th><th>MODEL ESTIMATE</th><th>WHY</th></tr></thead><tbody id="futureReplayRows"><tr><td colspan="5" class="empty-row">Generate the plan to replay recent bars.</td></tr></tbody></table>
+        </div>
+        <p class="micro-copy">Replay rows are re-runs over candles that have already closed. They are a transparency check on the gate, not a promise about the next candle.</p>
+        <a class="text-button inline-link" href="#telegram" data-route="telegram">PUBLISH RECORDED SIGNALS ON TELEGRAM ↗</a>
+      </article>
+      <article class="panel future-abstention-panel">
+        <div class="panel-heading"><div><div class="eyebrow small-eyebrow">RESTRAINT, MEASURED</div><h2>Abstention ledger</h2></div><span class="mode-tag" id="abstentionWindow">7 DAYS</span></div>
+        <div class="future-evidence-grid abstention-grid">
+          <div class="result-stat"><span>GATE ABSTENTIONS</span><strong id="abstentionGate">—</strong></div>
+          <div class="result-stat"><span>OPERATIONAL SKIPS</span><strong id="abstentionOperational">—</strong></div>
+          <div class="result-stat"><span>DECIDED SIGNALS</span><strong id="abstentionDecided">—</strong></div>
+          <div class="result-stat"><span>ABSTENTION SHARE</span><strong id="abstentionRatio">—</strong></div>
+        </div>
+        <div class="abstention-hours" id="abstentionHours" aria-label="Abstentions by UTC hour"></div>
+        <div class="abstention-columns">
+          <div><span class="abstention-heading">BY SESSION (UTC)</span><div class="abstention-session-list" id="abstentionSessions"></div></div>
+          <div><span class="abstention-heading">TOP REASONS</span><div class="abstention-reason-list" id="abstentionReasons"></div></div>
+        </div>
+        <p class="micro-copy">Every abstention is logged with its reason. The share compares gate abstentions with recorded BUY/SELL signals in the same window.</p>
+      </article>
+      <article class="panel future-alternatives-panel">
+        <div class="panel-heading"><div><div class="eyebrow small-eyebrow">PAIR CHOICE</div><h2>Liquidity order, not accuracy order</h2></div></div>
+        <div class="future-alternative-list" id="futureAlternatives"></div>
+        <p class="micro-copy">Only the active dataset is analysed. Import that pair's completed M1 CSV on the Data page to change the focus pair.</p>
+      </article>
+    </section>
+
+    <section class="page-view" id="page-trader" data-page="trader" aria-labelledby="trader-title" hidden>
+      <header class="page-heading">
+        <div><div class="eyebrow"><span class="eyebrow-line"></span> STEADY CADENCE · HARD LIMITS</div><h1 id="trader-title">Trader</h1><p>It collects a model read roughly every three minutes inside London and New York hours, caps the day, cools off after a losing run, and remembers contexts that burned it. A full stream is not an edge.</p></div>
+        <div class="blackhole-mini" aria-hidden="true"><i class="mini-ring ring-one"></i><i class="mini-ring ring-two"></i><b></b></div>
+      </header>
+      <div class="future-layout">
+        <article class="panel future-focus-panel">
+          <div class="panel-heading"><div><div class="eyebrow small-eyebrow">RIGHT NOW</div><h2 id="traderState">READING…</h2></div><span class="mode-tag" id="traderSession">—</span></div>
+          <p class="panel-intro" id="traderNote">Loading the discipline state…</p>
+          <div class="future-focus-grid">
+            <div><span>TRADING WINDOWS (UTC)</span><strong id="traderWindows">—</strong></div>
+            <div><span>NEXT WAKE-UP</span><strong id="traderNextOpen">—</strong></div>
+            <div><span>TRADE BUDGET</span><strong id="traderBudget">—</strong></div>
+            <div><span>LOSSES TODAY</span><strong id="traderLosses">—</strong></div>
+            <div><span>STREAK</span><strong id="traderStreak">—</strong></div>
+            <div><span>COOL-OFF / SPACING</span><strong id="traderWait">—</strong></div>
+          </div>
+          <p class="micro-copy" id="traderGradeNote">Conviction is a label, not a probability of profit.</p>
+          <p class="micro-copy">Cadence is a collection rhythm, not a quality claim. The measured paper record in TODAY'S REVIEW is the only evidence that matters.</p>
+          <p class="micro-copy" id="traderConfigError" role="status" hidden></p>
+        </article>
+        <aside class="panel future-evidence-panel">
+          <div class="eyebrow small-eyebrow">TODAY'S REVIEW</div>
+          <h2 id="traderReviewDate">—</h2>
+          <p class="panel-intro" id="traderReviewSummary">No trades reviewed yet.</p>
+          <div class="future-evidence-grid">
+            <div class="result-stat"><span>TRADES</span><strong id="traderReviewTrades">—</strong></div>
+            <div class="result-stat"><span>WINS / LOSSES</span><strong id="traderReviewRecord">—</strong></div>
+            <div class="result-stat"><span>NET PIPS</span><strong id="traderReviewPips">—</strong></div>
+            <div class="result-stat"><span>HIT RATE</span><strong id="traderReviewRate">—</strong></div>
+          </div>
+          <p class="micro-copy" id="traderReviewLesson">A small sample is not a verdict.</p>
+        </aside>
+      </div>
+      <article class="panel">
+        <div class="panel-heading"><div><div class="eyebrow small-eyebrow">JOURNAL</div><h2>What it did, and why</h2></div><button class="text-button" id="traderRefresh" type="button">REFRESH ↻</button></div>
+        <div class="history-table-wrap">
+          <table class="history-table"><thead><tr><th>TIME (UTC)</th><th>NOTE</th></tr></thead><tbody id="traderJournalRows"><tr><td colspan="2" class="empty-row">No journal entries yet.</td></tr></tbody></table>
+        </div>
+        <p class="micro-copy">Only taken trades and meaningful passes (budget, cool-off, loss stop, context veto) are written here, once each. Being asleep or waiting is shown above instead of being logged every minute.</p>
+      </article>
+      <article class="panel">
+        <div class="panel-heading"><div><div class="eyebrow small-eyebrow">MEMORY OF MISTAKES</div><h2>Context record</h2></div><span class="mode-tag" id="traderContextCount">—</span></div>
+        <div class="history-table-wrap">
+          <table class="history-table"><thead><tr><th>STRATEGY</th><th>SESSION</th><th>TRADES</th><th>HIT RATE</th><th>JOURNAL SAYS</th></tr></thead><tbody id="traderContextRows"><tr><td colspan="5" class="empty-row">No resolved trades yet.</td></tr></tbody></table>
+        </div>
+        <p class="micro-copy">A context needs the configured minimum sample before it can veto anything, so two unlucky trades cannot ban a setup.</p>
+      </article>
+      <article class="panel">
+        <div class="panel-heading"><div><div class="eyebrow small-eyebrow">THE RULES</div><h2>Limits, not predictions</h2></div></div>
+        <ol class="setup-steps" id="traderRules"><li>Loading the rules…</li></ol>
+        <p class="micro-copy">The model still learns from every completed bar. These rules govern paper signals and delivery only; they never add a trade and cannot manufacture an edge.</p>
+      </article>
+    </section>
+
+    <section class="page-view" id="page-telegram" data-page="telegram" aria-labelledby="telegram-title" hidden>
+      <header class="page-heading">
+        <div><div class="eyebrow"><span class="eyebrow-line"></span> ONE-CLICK DELIVERY</div><h1 id="telegram-title">Telegram channel</h1><p>Publish recorded M1 research signals to the single channel your admin bot can post in. The signal engine, its strategy, and every other page stay unchanged.</p></div>
+        <div class="blackhole-mini" aria-hidden="true"><i class="mini-ring ring-one"></i><i class="mini-ring ring-two"></i><b></b></div>
+      </header>
+      <div class="connection-layout">
+        <article class="panel telegram-send-panel">
+          <div class="panel-heading"><div><div class="eyebrow small-eyebrow">ADMIN BOT · ONE CHANNEL</div><h2>Deliver signals</h2></div><span class="mode-tag" id="telegramModeTag">CHECKING</span></div>
+          <div class="provider-state-card telegram-state-card"><span class="connection-indicator" id="telegramIndicator" aria-hidden="true"></span><div><span class="muted-label">TARGET CHANNEL</span><strong id="telegramTarget">NOT SET</strong><small id="telegramStateMessage">Reading server configuration…</small></div></div>
+          <div class="telegram-actions">
+            <button class="button button-primary" id="telegramSendLatest" type="button" disabled>SEND LATEST SIGNAL <span class="button-arrow">↗</span></button>
+            <button class="button button-secondary" id="telegramSendBatch" type="button" disabled>SEND LAST 5 <span class="button-arrow">↗</span></button>
+            <button class="button button-secondary" id="telegramTest" type="button" disabled>TEST CONNECTION</button>
+            <button class="text-button" id="telegramPreview" type="button">PREVIEW MESSAGE</button>
+          </div>
+          <label class="toggle-row" for="telegramAutoPost"><input type="checkbox" id="telegramAutoPost"><span><strong>AUTO-POST NEW AUTOMATIC SIGNALS</strong><small>Optional. Requires live provider data and a clear event calendar; a paper result follows after expiry.</small></span></label>
+          <label class="toggle-row" for="telegramIncludeDemo"><input type="checkbox" id="telegramIncludeDemo"><span><strong>ALLOW SYNTHETIC DEMO TRANSMISSION</strong><small>Off by default. Demo rows are labelled as synthetic and are not market evidence.</small></span></label>
+          <p class="micro-copy" id="telegramSendStatus" role="status">Configure the bot token and channel id on the server, then restart and test the connection.</p>
+          <p class="micro-copy" id="telegramLimitNote">Automatic posting stops at the daily cap and respects the cooldown. Manual sends count toward the cap.</p>
+          <pre class="telegram-preview" id="telegramPreviewText" hidden></pre>
+          <p class="micro-copy">Each signal is deduplicated by id. Re-sending the same id requires an explicit replay, so a double click cannot spam the channel.</p>
+        </article>
+        <aside class="panel telegram-setup-panel">
+          <div class="eyebrow small-eyebrow">SERVER SETUP</div>
+          <h2>Bot + channel checklist</h2>
+          <ol class="setup-steps">
+            <li>Create the bot with <strong>@BotFather</strong> and copy its token into the server environment.</li>
+            <li>Add that bot to the channel as an <strong>administrator</strong> with “Post messages”.</li>
+            <li>Use the numeric <code>-100…</code> channel id, or <code>@channelusername</code>.</li>
+            <li>Restart Orbix, press <strong>TEST CONNECTION</strong>, then use the one-click send.</li>
+          </ol>
+          <div class="server-provider-list">
+            <div><span>BOT TOKEN</span><strong id="telegramTokenState">NOT CONFIGURED</strong><small><code>ORBIX_TELEGRAM_BOT_TOKEN</code> · server only</small></div>
+            <div><span>CHANNEL ID</span><strong id="telegramChatState">NOT CONFIGURED</strong><small><code>ORBIX_TELEGRAM_CHAT_ID</code></small></div>
+            <div><span>TIME LABEL</span><strong id="telegramTimezoneState">Asia/Kolkata</strong><small><code>ORBIX_TELEGRAM_TIMEZONE</code></small></div>
+            <div><span>AUTO-POST DEFAULT</span><strong id="telegramAutoState">OFF</strong><small><code>ORBIX_TELEGRAM_AUTO_POST</code></small></div>
+            <div><span>DAILY MESSAGE CAP</span><strong id="telegramCapState">—</strong><small><code>ORBIX_TELEGRAM_DAILY_CAP</code> · resets 00:00 UTC</small></div>
+            <div><span>AUTO-POST COOLDOWN</span><strong id="telegramCooldownState">—</strong><small><code>ORBIX_TELEGRAM_COOLDOWN_SECONDS</code></small></div>
+          </div>
+          <p class="provider-security-note"><strong>Why the browser cannot send directly:</strong> Telegram bots need the token on every call. It stays on the server; the page only asks Orbix to send. A bot cannot read or trade your account, and no broker order is ever placed.</p>
+          <p class="provider-security-note"><strong>Broker OTC symbols:</strong> posts use the pair loaded from Orbix’s own feed (for example <code>EUR/USD</code>). Broker-generated symbols such as <code>EURUSD-OTC</code> are not in that feed and are never relabelled to look like one.</p>
+        </aside>
+      </div>
+      <article class="panel telegram-log-panel">
+        <div class="panel-heading"><div><div class="eyebrow small-eyebrow">DELIVERY LOG</div><h2>Recent automatic signals</h2></div><button class="text-button" id="telegramRefresh" type="button">REFRESH ↻</button></div>
+        <div class="history-table-wrap">
+          <table class="history-table"><thead><tr><th>ENTRY</th><th>PAIR</th><th>DIRECTION</th><th>MODEL ESTIMATE</th><th>DELIVERY</th></tr></thead><tbody id="telegramLogRows"><tr><td colspan="5" class="empty-row">No automatic signals recorded yet.</td></tr></tbody></table>
+        </div>
+        <p class="micro-copy">“QUEUED” means a signal exists but has not reached the channel. Results edit the original message in place when it is still editable; otherwise they post as a new message. Synthetic demo signals are never auto-posted.</p>
+      </article>
+    </section>
+
+  </main>
+
+  <div class="notification-toast" id="notificationToast" role="status" aria-live="polite" hidden></div>
+  <footer class="footer shell">
+    <div class="footer-brand"><span class="footer-mark">O</span><span>ORBIX <small>RESEARCH BUILD 0.1</small></span></div>
+    <p>Signal research only. Live feeds are optional/configured on the server. No Quotex login or real trades.</p>
+    <span class="footer-right">BUILT FOR BETTER QUESTIONS</span>
+  </footer>
+  <script src="/static/app.js?v=24" defer></script>
+</body>
+</html>

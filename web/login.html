@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#050505">
+  <meta name="robots" content="noindex">
+  <title>Sign in — Orbix Signal Lab</title>
+  <link rel="stylesheet" href="/static/styles.css?v=24">
+  <link rel="stylesheet" href="/static/login.css?v=1">
+</head>
+<body class="login-body">
+  <div class="noise" aria-hidden="true"></div>
+  <main class="login-shell">
+    <section class="login-card" aria-labelledby="login-title">
+      <a class="brand login-brand" href="/" aria-label="Orbix Signal Lab">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 52 52" role="img">
+            <circle cx="26" cy="26" r="19" fill="none" stroke="currentColor" stroke-width="1.4"/>
+            <ellipse cx="26" cy="26" rx="23" ry="9" fill="none" stroke="currentColor" stroke-width="1" transform="rotate(-33 26 26)"/>
+            <path d="M18 34 34 13l-5 19-13 7 2-5Z" fill="currentColor"/>
+            <circle cx="34" cy="13" r="2" fill="#050505"/>
+          </svg>
+        </span>
+        <span class="brand-copy"><strong>ORBIX</strong><small>SIGNAL LAB</small></span>
+      </a>
+      <div class="eyebrow login-eyebrow"><span class="eyebrow-line"></span> PRIVATE DASHBOARD</div>
+      <h1 id="login-title">Sign in</h1>
+      <p class="login-intro">Use the dashboard credentials configured on this server. Provider keys, signals, and paper results stay server-side.</p>
+      {{error}}
+      <form method="post" action="/login" class="login-form" autocomplete="on">
+        <input type="hidden" name="next" value="{{next}}">
+        <label class="field-label" for="username">USERNAME</label>
+        <input class="provider-input" id="username" name="username" type="text" autocomplete="username" autocapitalize="off" spellcheck="false" required autofocus>
+        <label class="field-label" for="password">PASSWORD</label>
+        <input class="provider-input" id="password" name="password" type="password" autocomplete="current-password" required>
+        <button class="button button-primary login-submit" type="submit">SIGN IN <span class="button-arrow">↗</span></button>
+      </form>
+      <p class="login-note"><strong>Research only.</strong> Orbix sends no broker orders. One-minute signals can lose.</p>
+    </section>
+    <p class="login-foot">Session cookies are HttpOnly and SameSite=Lax. Serve this page over HTTPS when it is reachable beyond localhost.</p>
+  </main>
+</body>
+</html>

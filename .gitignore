@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+.venv/
+.env
+.pytest_cache/
+.coverage
+htmlcov/
+.DS_Store
+
+# Runtime data, uploaded candles, paper outcomes, and fitted models
+/data/
+
+# Login session signing key when a custom data directory is not used
+session_secret
+session_secret.tmp

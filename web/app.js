@@ -1,0 +1,2388 @@
+const ROUTES = {
+  dashboard: "Dashboard",
+  engine: "Signal engine",
+  backtest: "Backtest",
+  data: "Data workspace",
+  connections: "Data connections",
+  paper: "Paper log",
+  "strategy-lab": "Strategy lab",
+  future: "Future",
+  telegram: "Telegram channel",
+  trader: "Trader discipline",
+};
+const state = { market: null, strategies: null, lastSignal: null, route: "dashboard", botClock: null, brokerTicket: null, providers: null, providersBusy: false, providerClearArmed: false, providerClearTimer: null, lastBacktestKey: null, backtestTimer: null, backtestRunning: false, automation: null, lastAutoSignalId: null, lastAutoCandleTimestamp: null, notificationsEnabled: false, toastTimer: null, telegram: null, telegramBusy: false, future: null, futureBusy: false, abstentions: null, modelSource: null, trader: null, authEnabled: false, csrf: null };
+const $ = (selector) => document.querySelector(selector);
+
+async function api(path, options = {}) {
+  const method = String(options.method || "GET").toUpperCase();
+  const requestsWrite = !["GET", "HEAD", "OPTIONS"].includes(method);
+  if (state.csrf && requestsWrite && !(options.headers || {})["X-Orbix-CSRF"]) {
+    options = { ...options, headers: { ...(options.headers || {}), "X-Orbix-CSRF": state.csrf } };
+  }
+  const response = await fetch(path, options);
+  const payload = await response.json().catch(() => ({}));
+  if (response.status === 401 && state.authEnabled && !path.startsWith("/api/auth/")) {
+    const next = `${window.location.pathname}${window.location.hash}`;
+    window.location.assign(`/login?next=${encodeURIComponent(next)}`);
+  }
+  if (!response.ok) throw new Error(payload.detail || `Request failed (${response.status})`);
+  return payload;
+}
+
+async function initAuth() {
+  let info = null;
+  try {
+    info = await api("/api/auth/status");
+  } catch (error) {
+    return;
+  }
+  state.authEnabled = Boolean(info.auth_enabled);
+  state.csrf = info.csrf || null;
+  const button = $("#signOutButton");
+  if (!button) return;
+  if (!state.authEnabled || !info.csrf) {
+    button.hidden = true;
+    return;
+  }
+  button.hidden = false;
+  button.textContent = `SIGN OUT · ${String(info.user || "").toUpperCase()}`;
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    try {
+      await api("/logout", { method: "POST", headers: { Accept: "application/json" } });
+    } catch (error) {
+      // The cookie may already be gone; still leave the dashboard.
+    }
+    window.location.assign("/login");
+  });
+}
+
+function formatPrice(value, pair = "EUR/USD") {
+  if (value == null || Number.isNaN(Number(value))) return "—";
+  const digits = pair.includes("JPY") ? 3 : pair.includes("INR") ? 4 : 5;
+  return Number(value).toFixed(digits);
+}
+
+function formatBytes(value) {
+  const bytes = Number(value) || 0;
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let size = bytes / 1024;
+  let unit = units[0];
+  for (let index = 1; size >= 1024 && index < units.length; index++) {
+    size /= 1024;
+    unit = units[index];
+  }
+  return `${size.toFixed(size >= 10 ? 0 : 1)} ${unit}`;
+}
+
+function formatRateInterval(interval) {
+  if (!interval || interval.lower == null || interval.upper == null) return "not available";
+  return `${(Number(interval.lower) * 100).toFixed(1)}%–${(Number(interval.upper) * 100).toFixed(1)}%`;
+}
+
+function compactTime(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  return new Intl.DateTimeFormat(undefined, {
+    timeZone: "UTC",
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZoneName: "short",
+  }).format(date);
+}
+
+function clockUtc(value, withSeconds = false) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat(undefined, {
+    timeZone: "UTC",
+    hour: "2-digit",
+    minute: "2-digit",
+    ...(withSeconds ? { second: "2-digit" } : {}),
+    hour12: false,
+  }).format(date);
+}
+
+function clockLocal(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+    timeZoneName: "short",
+  }).format(date);
+}
+
+function formatGap(seconds) {
+  const value = Math.abs(Number(seconds) || 0);
+  if (value < 90) return `${Math.round(value)}s`;
+  if (value < 5400) return `${Math.round(value / 60)} min`;
+  if (value < 172800) return `${(value / 3600).toFixed(1)} h`;
+  return `${(value / 86400).toFixed(1)} days`;
+}
+
+function renderClock() {
+  const clock = state.botClock;
+  if (!clock) return;
+  const mode = clock.mode === "REPLAY" ? "REPLAY" : "LIVE";
+  const badge = $("#botClockMode");
+  badge.textContent = `BOT · ${mode}`;
+  badge.dataset.mode = mode;
+  let reference = clock.reference;
+  if (mode === "LIVE" && clock.receivedAt) {
+    reference = new Date(Date.parse(clock.reference) + (Date.now() - clock.receivedAt)).toISOString();
+  }
+  $("#botClockTime").textContent = `${clockUtc(reference, true)} UTC`;
+  $("#botClockServer").textContent = `${clockUtc(clock.server_time, true)} UTC`;
+  $("#botClockData").textContent = clock.data_time ? `${clockUtc(clock.data_time, true)} UTC` : "—";
+  $("#botClockLocal").textContent = clockLocal(reference);
+  const gap = Number.isFinite(Number(clock.lag_seconds)) ? formatGap(clock.lag_seconds) : "unknown";
+  $("#botClockNote").textContent = mode === "REPLAY"
+    ? `Historical replay: the bot clock follows the imported candle, ${gap} behind the server. Generated, entry, expiry, and journal times now use that one clock.`
+    : `Live clock: bot time follows the server. The latest data boundary is ${gap} away.`;
+}
+
+function updateClock(clock) {
+  if (!clock) return;
+  state.botClock = { ...clock, receivedAt: Date.now() };
+  renderClock();
+}
+
+function renderBrokerHandoff(signal) {
+  const ticket = signal?.broker_ticket || null;
+  const mode = $("#handoffMode");
+  const copy = $("#copyTicket");
+  if (!mode || !copy) return;
+  state.brokerTicket = ticket;
+  if (!ticket) {
+    mode.textContent = "NO SIGNAL";
+    $("#handoffAsset").textContent = "—";
+    $("#handoffDirection").textContent = "—";
+    $("#handoffExpiry").textContent = "—";
+    $("#handoffEntry").textContent = "—";
+    $("#handoffNote").textContent = signal?.side === "NO SIGNAL"
+      ? "No trade: this read is NO SIGNAL. There is nothing to hand to the broker."
+      : "Generate or scan a BUY/SELL signal to build a copyable ticket. Orbix never places the trade.";
+    copy.disabled = true;
+    return;
+  }
+  mode.textContent = "MANUAL · NO ORDER SENT";
+  $("#handoffAsset").textContent = ticket.asset;
+  $("#handoffDirection").textContent = ticket.direction;
+  $("#handoffExpiry").textContent = `${ticket.expiry_minutes} minute${Number(ticket.expiry_minutes) === 1 ? "" : "s"}`;
+  $("#handoffEntry").textContent = compactTime(ticket.entry_time);
+  $("#handoffNote").textContent = `Ticket for ${ticket.pair} · ${ticket.direction}, expiring ${compactTime(ticket.expiry_time)}. Enter it manually in Pocket Option. No order has been sent, and Orbix has no broker session.`;
+  copy.disabled = false;
+}
+
+async function copyBrokerTicket() {
+  const ticket = state.brokerTicket;
+  if (!ticket) return;
+  const button = $("#copyTicket");
+  let copied = false;
+  try {
+    await navigator.clipboard.writeText(ticket.text);
+    copied = true;
+  } catch (error) {
+    const area = document.createElement("textarea");
+    area.value = ticket.text;
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    document.body.appendChild(area);
+    area.select();
+    try {
+      copied = document.execCommand("copy");
+    } catch (copyError) {
+      copied = false;
+    } finally {
+      area.remove();
+    }
+  }
+  button.textContent = copied ? "COPIED" : "COPY FAILED";
+  button.disabled = true;
+  window.setTimeout(() => {
+    button.textContent = "COPY TICKET";
+    button.disabled = false;
+  }, 1600);
+}
+
+function showError(message) {
+  const notice = $("#importStatus");
+  if (notice) notice.textContent = message;
+}
+
+function signalLeadLabel(generatedAt, predictionAt) {
+  const difference = Math.round((Date.parse(predictionAt) - Date.parse(generatedAt)) / 1000);
+  if (!Number.isFinite(difference)) return "— lead";
+  const seconds = Math.abs(difference);
+  const duration = seconds >= 60 ? `${Math.floor(seconds / 60)}m ${seconds % 60}s` : `${seconds}s`;
+  return difference < 0 ? `expired ${duration} ago` : `${duration} lead`;
+}
+
+function showNotificationToast(message) {
+  const toast = $("#notificationToast");
+  if (!toast) return;
+  toast.textContent = message;
+  toast.hidden = false;
+  window.clearTimeout(state.toastTimer);
+  state.toastTimer = window.setTimeout(() => { toast.hidden = true; }, 9000);
+}
+
+function updateNotificationButton() {
+  const button = $("#enableNotifications");
+  if (!button) return;
+  if (!("Notification" in window)) {
+    button.textContent = "ALERTS UNSUPPORTED";
+    button.disabled = true;
+  } else if (Notification.permission === "denied") {
+    button.textContent = "ALERTS BLOCKED IN BROWSER";
+    button.disabled = true;
+  } else {
+    button.disabled = false;
+    button.textContent = state.notificationsEnabled ? "ALERTS ON · CLICK TO PAUSE" : "ENABLE ALERTS";
+  }
+}
+
+function renderUpcomingEvents(guard) {
+  const container = $("#upcomingEvents");
+  if (!container) return;
+  container.replaceChildren();
+  const events = guard?.events || [];
+  if (!events.length) {
+    const empty = document.createElement("small");
+    empty.textContent = guard?.active_event ? "An active event is inside the blackout window." : "No relevant high-impact events in the next 24 hours.";
+    container.append(empty);
+    return;
+  }
+  events.slice(0, 4).forEach((event) => {
+    const row = document.createElement("div");
+    row.className = "upcoming-event-row";
+    const name = document.createElement("strong");
+    name.textContent = `${event.country || "—"} · ${event.event || "Economic release"}`;
+    const time = document.createElement("span");
+    time.textContent = compactTime(event.time);
+    row.append(name, time);
+    container.append(row);
+  });
+}
+
+function notifyForAutomaticSignal(signal) {
+  if (!signal || !signal.signal_id) return;
+  renderSignal(signal);
+  refreshHistory();
+  if (signal.side === "NO SIGNAL") return;
+  const entry = compactTime(signal.entry_time || signal.generated_at);
+  const expiry = compactTime(signal.prediction_time || signal.expires_at);
+  const headline = signal.heading || `Orbix · ${signal.side}`;
+  showNotificationToast(`${headline} · ${signal.pair} · entry ${entry} · prediction ${expiry}`);
+  if (state.notificationsEnabled && "Notification" in window && Notification.permission === "granted") {
+    const notification = new Notification(headline, {
+      body: `${signal.pair} · entry ${entry} · prediction ${expiry}. ${signal.reason || "Research signal only."}`,
+      tag: `orbix-${signal.signal_id}`,
+    });
+    notification.onclick = () => { window.focus(); window.location.hash = "#engine"; notification.close(); };
+  }
+}
+
+async function refreshAutomationStatus() {
+  if (state.automationPolling) return;
+  state.automationPolling = true;
+  try {
+    const data = await api("/api/automation/status");
+    state.automation = data;
+    updateClock(data.clock);
+    const market = data.market || {};
+    const calendar = data.calendar || {};
+    const guard = calendar.guard || { status: "UNAVAILABLE", message: "Calendar unavailable.", events: [] };
+    const active = Boolean(data.automatic_signals_active);
+    const connectionText = active ? "AUTOMATION READY" : market.connected && !market.data_fresh ? "MARKET DATA STALE · SIGNALS PAUSED" : market.connected ? "MARKET CONNECTED · SIGNALS PAUSED" : market.configured ? "MARKET FEED WAITING" : "SERVER FEED NOT CONFIGURED";
+    $("#connectionStatus").textContent = connectionText;
+    $("#connectionDetail").textContent = `${market.provider || "Market provider"} · ${market.refresh_seconds || 60}s refresh · news: ${guard.status.toLowerCase()}`;
+    $("#connectionIndicator").classList.toggle("is-configured", Boolean(market.configured && market.connected));
+    $("#connectionIndicator").classList.toggle("is-pending", Boolean(market.configured && !market.connected));
+
+    const paper = Boolean(data.paper_automation_active);
+    const paperWaiting = Boolean(data.paper_automation_waiting);
+    $("#autoSignalState").textContent = active
+      ? "ACTIVE · NEW CLOSED BARS ONLY"
+      : paperWaiting ? "WATCHING · HISTORICAL DATA"
+      : paper ? "ACTIVE · IMPORTED PAPER" : "PAUSED · PROVIDER REQUIREMENTS";
+    const learned = data.dataset_learning || {};
+    const learningNote = learned.resolved
+      ? ` Dataset outcomes: ${Number(learned.learned || 0).toLocaleString()}/${Number(learned.resolved || 0).toLocaleString()} kept.`
+      : "";
+    const paperNote = data.paper_automation_note ? ` ${data.paper_automation_note}` : "";
+    $("#autoSignalDetail").textContent = `${data.auto_status}${paperNote} News guard: ${guard.status.toLowerCase()}.${learningNote}`;
+    $("#newsGuardState").textContent = guard.status === "BLACKOUT" ? "NEWS BLACKOUT" : guard.status;
+    $("#newsGuardDetail").textContent = guard.message || "Economic-calendar state unavailable.";
+    renderUpcomingEvents(guard);
+
+    const feedStatus = !market.configured ? "NOT CONFIGURED" : market.last_error ? "FEED ERROR" : market.connected && !market.data_fresh ? "STALE DATA" : market.connected ? "CONNECTED" : market.paused_by_user ? "PAUSED BY USER" : market.active_source === "IMPORTED CSV" && !market.active_dataset_is_provider ? "MANUAL CSV ACTIVE" : "WAITING FOR SYNC";
+    $("#marketFeedState").textContent = feedStatus;
+    $("#marketFeedMessage").textContent = market.last_error || (market.connected
+      ? `Last sync ${market.last_success ? compactTime(market.last_success) : "—"}; latest bar age ${Math.max(0, Math.round(market.latest_bar_age_seconds || 0))}s (limit ${market.max_bar_age_seconds}s); ${market.refresh_seconds}s refresh.`
+      : market.configured ? "Use Sync / Activate Live Feed to select the provider dataset." : "Set ORBIX_TWELVE_DATA_API_KEY on the server.");
+    $("#calendarFeedState").textContent = !calendar.configured ? "NOT CONFIGURED" : calendar.connected ? "CONNECTED" : calendar.last_error ? "CALENDAR ERROR" : "WAITING FOR REFRESH";
+    $("#calendarFeedMessage").textContent = calendar.last_error || (calendar.connected
+      ? `${Number(calendar.event_count || 0)} events cached · refresh ${calendar.last_updated ? compactTime(calendar.last_updated) : "—"} · ${calendar.timezone || "UTC"}.`
+      : calendar.configured ? "Refresh the calendar to enable news-aware automatic signals." : "Set ORBIX_FINNHUB_API_KEY; provider access may require a paid plan.");
+    $("#providerPageState").textContent = active ? "AUTOMATION READY" : "AUTOMATION PAUSED";
+    $("#providerPageMessage").textContent = data.auto_status;
+    $("#providerStatusIndicator").classList.toggle("is-configured", active);
+    $("#providerStatusIndicator").classList.toggle("is-pending", !active && Boolean(market.configured || calendar.configured));
+    $("#syncLiveFeedButton").disabled = !market.configured;
+    $("#refreshCalendarButton").disabled = !calendar.configured;
+
+    const latestCandleTimestamp = market.latest_candle?.timestamp;
+    if (latestCandleTimestamp && state.lastAutoCandleTimestamp && latestCandleTimestamp !== state.lastAutoCandleTimestamp) {
+      await Promise.all([loadMarket(), refreshHistory()]);
+    }
+    if (latestCandleTimestamp) state.lastAutoCandleTimestamp = latestCandleTimestamp;
+
+    const signal = data.latest_auto_signal;
+    if (signal?.signal_id && signal.signal_id !== state.lastAutoSignalId) {
+      const firstPoll = state.lastAutoSignalId === null;
+      state.lastAutoSignalId = signal.signal_id;
+      const signalAge = Date.now() - Date.parse(signal.automation_generated_at || signal.generated_at || "");
+      if (!firstPoll || (Number.isFinite(signalAge) && signalAge >= 0 && signalAge <= 120000)) {
+        notifyForAutomaticSignal(signal);
+      }
+    }
+  } catch (error) {
+    $("#autoSignalState").textContent = "AUTOMATION STATUS UNAVAILABLE";
+    $("#autoSignalDetail").textContent = error.message;
+  } finally {
+    state.automationPolling = false;
+  }
+}
+
+function drawChart(candles) {
+  const canvas = $("#priceChart");
+  const empty = $("#chartEmpty");
+  if (!canvas || !candles || !candles.length) return;
+  const rect = canvas.getBoundingClientRect();
+  if (rect.width < 2 || rect.height < 2) return;
+  const ratio = window.devicePixelRatio || 1;
+  canvas.width = Math.max(1, Math.floor(rect.width * ratio));
+  canvas.height = Math.max(1, Math.floor(rect.height * ratio));
+  const ctx = canvas.getContext("2d");
+  ctx.scale(ratio, ratio);
+  const width = rect.width;
+  const height = rect.height;
+  ctx.clearRect(0, 0, width, height);
+  const pad = { left: 7, right: 54, top: 15, bottom: 23 };
+  const plotWidth = width - pad.left - pad.right;
+  const plotHeight = height - pad.top - pad.bottom;
+  const visible = candles.slice(-95);
+  const high = Math.max(...visible.map((item) => Number(item.high)));
+  const low = Math.min(...visible.map((item) => Number(item.low)));
+  const spread = Math.max(high - low, Math.abs(high) * 0.00001);
+  const y = (price) => pad.top + ((high - price) / spread) * plotHeight;
+  const step = plotWidth / visible.length;
+  const bodyWidth = Math.max(2, Math.min(7, step * 0.55));
+
+  ctx.strokeStyle = "rgba(255,255,255,.075)";
+  ctx.lineWidth = 1;
+  for (let line = 0; line <= 4; line++) {
+    const yy = pad.top + (plotHeight * line) / 4;
+    ctx.beginPath(); ctx.moveTo(pad.left, yy); ctx.lineTo(pad.left + plotWidth, yy); ctx.stroke();
+    const price = high - (spread * line) / 4;
+    ctx.fillStyle = "rgba(255,255,255,.4)";
+    ctx.font = "9px ui-monospace, monospace";
+    ctx.textAlign = "right";
+    ctx.fillText(formatPrice(price, $("#pairSelect").value), width - 5, yy + 3);
+  }
+
+  visible.forEach((candle, index) => {
+    const x = pad.left + index * step + step / 2;
+    const openY = y(Number(candle.open));
+    const closeY = y(Number(candle.close));
+    const up = Number(candle.close) >= Number(candle.open);
+    ctx.strokeStyle = up ? "rgba(255,255,255,.88)" : "rgba(255,255,255,.38)";
+    ctx.fillStyle = up ? "rgba(255,255,255,.92)" : "rgba(255,255,255,.08)";
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x, y(Number(candle.high))); ctx.lineTo(x, y(Number(candle.low))); ctx.stroke();
+    const top = Math.min(openY, closeY);
+    const bodyHeight = Math.max(1.4, Math.abs(openY - closeY));
+    ctx.fillRect(x - bodyWidth / 2, top, bodyWidth, bodyHeight);
+    if (!up) ctx.strokeRect(x - bodyWidth / 2, top, bodyWidth, bodyHeight);
+  });
+
+  ctx.strokeStyle = "rgba(255,255,255,.72)";
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath();
+  const lastY = y(Number(visible[visible.length - 1].close));
+  ctx.moveTo(pad.left, lastY); ctx.lineTo(pad.left + plotWidth, lastY); ctx.stroke();
+  ctx.setLineDash([]);
+  empty.style.display = "none";
+}
+
+async function loadMarket() {
+  const pair = $("#pairSelect").value || state.market?.pair || "EUR/USD";
+  try {
+    const data = await api(`/api/market?pair=${encodeURIComponent(pair)}&limit=180`);
+    state.market = data;
+    $("#pairSelect").value = data.pair;
+    $("#pairTitle").textContent = data.pair;
+    $("#enginePairLabel").textContent = `${data.pair} · M1`;
+    $("#backtestPairLabel").textContent = `${data.pair} · M1`;
+    $("#importPairLabel").textContent = `Selected pair: ${data.pair}`;
+    $("#dashboardSignalPair").textContent = `${data.pair} · M1`;
+    $("#latestPrice").textContent = formatPrice(data.latest?.close, data.pair);
+    $("#latestTime").textContent = data.latest ? compactTime(data.latest.timestamp) : "No candle";
+    $("#marketSource").textContent = data.source_label || data.source;
+    const synthetic = data.source === "SYNTHETIC DEMO";
+    $("#sourceBadge").textContent = data.live_feed_connected ? "LIVE FEED" : synthetic ? "SYNTHETIC DEMO" : "CSV HISTORY";
+    $("#feedNoticeText").innerHTML = data.live_feed_connected
+      ? "<strong>Live M1 feed connected.</strong> Prices come from the configured Twelve Data account and may differ from a broker’s executable quotes. News blackouts and stale-candle checks remain active."
+      : synthetic
+        ? "<strong>Synthetic demo prices are active.</strong> No live FX feed is configured or connected, and no Quotex connection is present. Signals and test results are not real-market results."
+        : "<strong>Imported CSV history is active.</strong> Prices are historical file data, not a live feed. Signals and test results do not predict future performance.";
+    $("#candleCount").textContent = data.total_candles.toLocaleString();
+    $("#chartRange").textContent = `${data.candles.length} BARS`;
+    if (state.route === "dashboard") drawChart(data.candles);
+    if (data.source === "IMPORTED CSV" || state.route === "backtest") scheduleAutomaticBacktest();
+  } catch (error) {
+    showError(error.message);
+    if (state.market?.source === "IMPORTED CSV") $("#pairSelect").value = state.market.pair;
+  }
+}
+
+async function refreshStorageSummary() {
+  try {
+    const [storage, learning] = await Promise.all([api("/api/storage"), api("/api/learning")]);
+    $("#storageDatasetCount").textContent = Number(storage.datasets_archived).toLocaleString();
+    $("#storageCandleCount").textContent = Number(storage.candles_archived).toLocaleString();
+    $("#storageFileSize").textContent = formatBytes(storage.database_bytes);
+    $("#storageHotWindow").textContent = `${Number(storage.active_window_in_memory).toLocaleString()} / ${Number(storage.signal_window_limit).toLocaleString()}`;
+    const activeInfo = storage.active_source === "IMPORTED CSV"
+      ? `Active: ${storage.active_pair} · ${Number(storage.active_candles).toLocaleString()} candles`
+      : "Synthetic demo is active; archived CSV datasets are preserved.";
+    $("#storageArchiveNote").textContent = `${activeInfo} Archive location: ${storage.path}.`;
+    const history = $("#datasetHistory");
+    history.replaceChildren();
+    if (!storage.datasets?.length) {
+      const empty = document.createElement("p");
+      empty.className = "dataset-empty";
+      empty.textContent = "No imported datasets archived yet.";
+      history.append(empty);
+    } else {
+      storage.datasets.forEach((dataset) => {
+        const row = document.createElement("div");
+        row.className = "dataset-row";
+        const description = document.createElement("div");
+        description.className = "dataset-description";
+        const title = document.createElement("strong");
+        title.textContent = `${dataset.pair} · ${dataset.timeframe}${dataset.active ? " · ACTIVE" : ""}`;
+        const details = document.createElement("span");
+        const firstDate = String(dataset.first_timestamp || "").slice(0, 10);
+        const lastDate = String(dataset.latest_timestamp || "").slice(0, 10);
+        details.textContent = `${Number(dataset.candle_count).toLocaleString()} candles · ${firstDate} → ${lastDate}`;
+        description.append(title, details);
+        const activate = document.createElement("button");
+        activate.type = "button";
+        activate.className = "dataset-activate-button";
+        activate.textContent = dataset.active ? "ACTIVE" : "LOAD";
+        activate.disabled = dataset.active;
+        activate.dataset.activateDataset = dataset.dataset_id;
+        row.append(description, activate);
+        history.append(row);
+      });
+    }
+    $("#learningUpdateCount").textContent = Number(learning.online_updates).toLocaleString();
+    $("#learningAccuracy").textContent = learning.prequential_accuracy == null
+      ? "—"
+      : `${(Number(learning.prequential_accuracy) * 100).toFixed(1)}%`;
+    const scored = Number(learning.prequential_evaluated_predictions || 0);
+    const correct = Number(learning.prequential_correct_predictions || 0);
+    const interval = learning.prequential_accuracy_ci95;
+    const accuracyEvidence = scored
+      ? `Prediction record: ${correct}/${scored} correct before updates; 95% Wilson interval ${formatRateInterval(interval)}.`
+      : "No non-tied imported-data predictions have matured for evaluation yet.";
+    $("#learningNote").textContent = learning.enabled_for_imported_csv
+      ? `${learning.update_policy} ${Number(learning.online_updates).toLocaleString()} updates from ${Number(learning.resolved_outcomes_seen).toLocaleString()} outcomes; ${Number(learning.training_samples).toLocaleString()} model samples. ${accuracyEvidence} Ties do not change weights.`
+      : `Demo mode is active, so paper outcomes will not train the model. ${learning.update_policy}`;
+  } catch (error) {
+    $("#storageArchiveNote").textContent = `Storage or learning status unavailable: ${error.message}`;
+  }
+}
+
+async function activateArchivedDataset(datasetId, button) {
+  button.disabled = true;
+  try {
+    const result = await api(`/api/datasets/${encodeURIComponent(datasetId)}/activate`, { method: "POST" });
+    $("#importStatus").textContent = `Activated archived ${result.pair} dataset with ${Number(result.candle_count).toLocaleString()} candles.`;
+    await Promise.all([loadMarket(), refreshHistory(), refreshStorageSummary()]);
+    scheduleAutomaticBacktest();
+  } catch (error) {
+    $("#importStatus").textContent = error.message;
+    button.disabled = false;
+  }
+}
+
+function renderSignal(signal) {
+  state.lastSignal = signal;
+  const side = signal.side || "NO SIGNAL";
+  const glyph = side === "BUY" ? "↑" : side === "SELL" ? "↓" : "◌";
+  const entryTime = signal.entry_time || signal.generated_at;
+  const generatedAt = signal.generated_at || entryTime;
+  const predictionTime = signal.prediction_time || signal.expires_at;
+  const strategyName = state.strategies?.executable?.find((item) => item.id === signal.strategy)?.name || signal.strategy || "Orbix";
+  const ruleMatch = String(signal.reason || "").match(/(\d)\/6/);
+  $("#signalHeadline").textContent = signal.heading || `${strategyName} · ${side}`;
+  $("#signalSide").textContent = side;
+  $("#signalReason").textContent = signal.reason || "No explanation returned.";
+  $("#entryTime").textContent = compactTime(entryTime);
+  $("#generatedTime").textContent = compactTime(generatedAt);
+  $("#expiryTime").textContent = `${compactTime(predictionTime)} · ${signalLeadLabel(generatedAt, predictionTime)}`;
+  const probabilityText = signal.probability_up == null
+    ? null
+    : `${(signal.probability_up * 100).toFixed(1)}% up${signal.probability_calibrated ? " · calibrated" : " · raw"}`;
+  $("#modelScore").textContent = signal.strategy === "orbix_confluence"
+    ? [ruleMatch ? `${ruleMatch[1]}/6 checks` : "rule-based", probabilityText].filter(Boolean).join(" · ")
+    : probabilityText || "—";
+  $("#modelScore").title = (signal.contributions || []).slice(0, 3)
+    .map((item) => `${item.label} ${item.contribution > 0 ? "+" : ""}${Number(item.contribution).toFixed(3)}`)
+    .join(" · ");
+  $("#signalGlyph").textContent = glyph;
+  $("#signalResult").dataset.side = side.toLowerCase().replaceAll(" ", "-");
+  $("#signalSide").title = signal.signal_id || "";
+  if (signal.news_guard) {
+    $("#newsGuardState").textContent = signal.news_guard.status === "BLACKOUT" ? "NEWS BLACKOUT" : signal.news_guard.status;
+    $("#newsGuardDetail").textContent = signal.news_guard.message || "No event context returned.";
+    renderUpcomingEvents(signal.news_guard);
+  }
+
+  $("#dashboardSignalSide").textContent = side;
+  $("#dashboardSignalGlyph").textContent = glyph;
+  $("#dashboardSignalReason").textContent = signal.reason || "No explanation returned.";
+  $("#dashboardSignalPair").textContent = `${signal.pair} · M1`;
+  $("#dashboardSignalTimestamp").textContent = compactTime(entryTime);
+  renderBrokerHandoff(signal);
+  refreshHistory();
+}
+
+function renderScan(scan) {
+  const results = scan.results || [];
+  const summary = $("#scanSummary");
+  const recordNote = !scan.recorded
+    ? ""
+    : scan.recorded.already_recorded
+      ? " · BEST ALREADY RECORDED"
+      : " · BEST RECORDED";
+  summary.textContent = `${scan.qualified || 0} / ${results.length} QUALIFIED${recordNote}`;
+  const body = $("#scanRows");
+  body.replaceChildren();
+  if (!results.length) {
+    const row = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = 5;
+    cell.className = "empty-row";
+    cell.textContent = "The scan returned no methods.";
+    row.appendChild(cell);
+    body.appendChild(row);
+  } else {
+    for (const result of results) {
+      const row = document.createElement("tr");
+      const recorded = Boolean(scan.recorded && scan.recorded.strategy === result.strategy && scan.recorded.side === result.side);
+      const method = document.createElement("td");
+      method.textContent = result.strategy_name || result.strategy;
+      if (recorded) {
+        const marker = document.createElement("strong");
+        marker.textContent = " · RECORDED";
+        method.appendChild(marker);
+      }
+      const side = document.createElement("td");
+      side.textContent = result.side || "NO SIGNAL";
+      const grade = document.createElement("td");
+      grade.textContent = result.side === "NO SIGNAL" ? "—" : (result.grade || "—");
+      const model = document.createElement("td");
+      model.textContent = result.probability_up == null
+        ? "—"
+        : `${(Number(result.probability_up) * 100).toFixed(1)}%${result.probability_calibrated ? " cal" : " raw"}`;
+      const why = document.createElement("td");
+      why.textContent = String(result.reason || "").slice(0, 180);
+      why.title = result.reason || "";
+      row.append(method, side, grade, model, why);
+      body.appendChild(row);
+    }
+  }
+  const note = $("#scanNote");
+  if (scan.news_guard?.status === "BLACKOUT") {
+    note.textContent = `News blackout: ${scan.news_guard.message} No method is allowed to record a signal.`;
+  } else if (scan.record_error) {
+    note.textContent = `The scan ran, but recording the best read failed: ${scan.record_error}`;
+  } else if (scan.recorded?.already_recorded) {
+    note.textContent = "This candle already has a paper trade from the best method, so the scan showed it instead of writing a duplicate.";
+  } else {
+    note.textContent = "Every executable method was evaluated on the same candle with the same model and ensemble. Only the strictest qualified read was recorded.";
+  }
+}
+
+async function generateSignal() {
+  const button = $("#generateButton");
+  button.disabled = true;
+  button.querySelector("span:first-child").textContent = "TESTING 6 METHODS…";
+  try {
+    const scan = await api("/api/signals/scan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        pair: $("#pairSelect").value || state.market?.pair || "EUR/USD",
+        horizon: 1,
+        record: true,
+      }),
+    });
+    renderScan(scan);
+    if (scan.recorded) {
+      renderSignal(scan.recorded);
+    } else {
+      renderSignal({
+        side: "NO SIGNAL",
+        strategy: "scan",
+        pair: scan.pair,
+        heading: "ALL STRATEGIES · NO SIGNAL",
+        reason: scan.qualified
+          ? `A method qualified, but the best read could not be recorded: ${scan.record_error || "unknown reason"}.`
+          : `Tested ${(scan.results || []).length} methods; none qualified on this candle.`,
+        entry_time: scan.entry_time,
+        prediction_time: scan.prediction_time,
+        generated_at: new Date().toISOString(),
+        probability_up: null,
+        probability_calibrated: false,
+        contributions: [],
+        news_guard: scan.news_guard,
+      });
+    }
+    void loadModelCard();
+  } catch (error) {
+    $("#signalSide").textContent = "ENGINE ERROR";
+    $("#signalReason").textContent = error.message;
+    $("#signalGlyph").textContent = "!";
+  } finally {
+    button.disabled = false;
+    button.querySelector("span:first-child").textContent = "TEST ALL STRATEGIES";
+  }
+}
+
+function currentBacktestKey() {
+  const payout = Math.max(1, Math.min(100, Number($("#payoutInput").value) || 80)) / 100;
+  return [
+    $("#pairSelect").value || state.market?.pair || "EUR/USD",
+    state.market?.source || "",
+    state.market?.dataset_id || "",
+    Math.floor(Number(state.market?.total_candles || 0) / 50) * 50,
+    $("#strategySelect").value,
+    payout,
+  ].join("|");
+}
+
+function scheduleAutomaticBacktest() {
+  window.clearTimeout(state.backtestTimer);
+  state.backtestTimer = window.setTimeout(() => {
+    state.backtestTimer = null;
+    if (state.market?.source !== "IMPORTED CSV") {
+      $("#backtestNote").textContent = "Automatic walk-forward testing starts after importing real M1 history. Synthetic demo candles are excluded from automatic accuracy reports.";
+      return;
+    }
+    void runBacktest(false);
+  }, 250);
+}
+
+async function runBacktest(force = true) {
+  if (state.backtestRunning) return;
+  const key = currentBacktestKey();
+  if (!force && state.lastBacktestKey === key) return;
+  state.backtestRunning = true;
+  const button = $("#backtestButton");
+  button.disabled = true;
+  button.querySelector("span:first-child").textContent = "TESTING…";
+  try {
+    const payout = Math.max(1, Math.min(100, Number($("#payoutInput").value) || 80)) / 100;
+    const report = await api("/api/backtest", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pair: $("#pairSelect").value || state.market?.pair || "EUR/USD", strategy: $("#strategySelect").value, horizon: 1, payout }),
+    });
+    $("#btSignals").textContent = report.signals;
+    $("#btWinRate").textContent = report.win_rate == null ? "—" : `${(report.win_rate * 100).toFixed(1)}%`;
+    $("#btNet").textContent = `${report.net_units > 0 ? "+" : ""}${report.net_units.toFixed(2)}u`;
+    $("#btBreakEven").textContent = `${(report.break_even_win_rate * 100).toFixed(1)}%`;
+    const ci = formatRateInterval(report.win_rate_ci95);
+    const recent = report.last_20_decisive;
+    const targetStatus = recent.trades < 20
+      ? `19/20 check unavailable: only ${recent.trades} decisive trades in this test.`
+      : `Last 20 decisive trades: ${recent.wins}/20; ${recent.target_met ? "observed target, not proof of future accuracy" : "target not met"}.`;
+    const rateText = report.win_rate == null
+      ? "No decisive signals in the test window."
+      : `${report.wins}/${report.decisive_trades} decisive wins; 95% Wilson interval ${ci}.`;
+    const calibration = report.calibration || {};
+    const calibrationText = calibration.flat
+      ? ` Calibration collapsed to a single level on ${Number(calibration.fitted_on_outcomes || 0).toLocaleString()} resolved outcomes. The low ECE is an artifact of giving every score the same base rate, not evidence of a ranking edge; the flat-calibration gate removes model signals while this holds.`
+      : calibration.fitted
+        ? ` Probability source: ${report.probability}. On the same ${Number(calibration.calibration_points_available || 0).toLocaleString()} later predictions: ECE ${(Number(calibration.raw_ece) * 100).toFixed(1)}% raw → ${(Number(calibration.calibrated_ece) * 100).toFixed(1)}% calibrated; Brier ${Number(calibration.raw_brier).toFixed(4)} → ${Number(calibration.calibrated_brier).toFixed(4)}. Lower is better for both; calibration improves reliability, not necessarily sharpness. Last fit validated on ${Number(calibration.last_validation?.validated_on || 0).toLocaleString()} already-matured outcomes.`
+        : " Not enough matured outcomes in this window to fit a calibrator; probabilities stayed raw.";
+    const gate = report.uncertainty_gate || {};
+    const gateText = gate.enabled && gate.evaluated
+      ? ` Uncertainty gate: ${Number(gate.blocked_signals || 0).toLocaleString()} would-be signals removed out of ${Number(gate.evaluated).toLocaleString()} model bars (limit ${(Number(gate.limit) * 100).toFixed(1)} pp).`
+      : "";
+    const flatGate = report.calibration_gate || {};
+    const flatGateText = flatGate.flat
+      ? ` Flat-calibration gate: ${Number(flatGate.blocked_signals || 0).toLocaleString()} would-be signals removed out of ${Number(flatGate.abstentions || 0).toLocaleString()} gated bars.`
+      : "";
+    $("#backtestNote").textContent = `${report.data_source || "Current data"} · ${report.test_candles} later candles tested · ${rateText} ${targetStatus} Coverage ${(report.signal_coverage * 100).toFixed(1)}%; net ${report.net_units.toFixed(2)} units; max drawdown ${report.max_drawdown_units.toFixed(2)} units.${calibrationText}${gateText}${flatGateText} ${report.note}`;
+    state.lastBacktestKey = key;
+  } catch (error) {
+    $("#backtestNote").textContent = error.message;
+  } finally {
+    state.backtestRunning = false;
+    button.disabled = false;
+    button.querySelector("span:first-child").textContent = "RUN WALK-FORWARD TEST";
+    if (state.market?.source === "IMPORTED CSV" && currentBacktestKey() !== key) scheduleAutomaticBacktest();
+  }
+}
+
+async function syncLiveFeed() {
+  const button = $("#syncLiveFeedButton");
+  button.disabled = true;
+  button.querySelector("span:first-child").textContent = "SYNCING…";
+  try {
+    const result = await api("/api/automation/sync", { method: "POST" });
+    showNotificationToast(result.message || `Live feed sync ${result.status}.`);
+    await Promise.all([loadMarket(), refreshStorageSummary(), refreshHistory(), refreshAutomationStatus()]);
+  } catch (error) {
+    $("#marketFeedMessage").textContent = error.message;
+    $("#marketFeedState").textContent = "SYNC FAILED";
+  } finally {
+    button.disabled = !state.automation?.market?.configured;
+    button.querySelector("span:first-child").textContent = "SYNC / ACTIVATE LIVE FEED";
+  }
+}
+
+async function refreshCalendarNow() {
+  const button = $("#refreshCalendarButton");
+  button.disabled = true;
+  button.querySelector("span:first-child").textContent = "REFRESHING…";
+  try {
+    await api("/api/automation/calendar/refresh", { method: "POST" });
+    await refreshAutomationStatus();
+  } catch (error) {
+    $("#calendarFeedMessage").textContent = error.message;
+    $("#calendarFeedState").textContent = "REFRESH FAILED";
+  } finally {
+    button.disabled = !state.automation?.calendar?.configured;
+    button.querySelector("span:first-child").textContent = "REFRESH EVENT CALENDAR";
+  }
+}
+
+async function toggleBrowserNotifications() {
+  if (!("Notification" in window)) return;
+  if (Notification.permission === "default") {
+    const permission = await Notification.requestPermission();
+    state.notificationsEnabled = permission === "granted";
+  } else if (Notification.permission === "granted") {
+    state.notificationsEnabled = !state.notificationsEnabled;
+  }
+  updateNotificationButton();
+  showNotificationToast(state.notificationsEnabled ? "Browser alerts enabled for new automatic BUY/SELL signals." : "Browser alerts paused; in-page signals remain active.");
+}
+
+async function importCsv() {
+  const file = $("#csvFile").files?.[0];
+  if (!file) return;
+  $("#importStatus").textContent = `Uploading ${file.name} (${formatBytes(file.size)}) to the local candle archive…`;
+  try {
+    const pair = $("#pairSelect").value || state.market?.pair || "EUR/USD";
+    const result = await api(`/api/import?pair=${encodeURIComponent(pair)}`, {
+      method: "POST",
+      headers: { "Content-Type": "text/csv" },
+      body: file,
+    });
+    $("#importStatus").textContent = `${result.candles_loaded.toLocaleString()} candles stored for ${result.pair}. ${result.note}`;
+    $("#paperLogStatus").textContent = "";
+    await Promise.all([loadMarket(), refreshHistory(), refreshStorageSummary()]);
+    scheduleAutomaticBacktest();
+  } catch (error) {
+    $("#importStatus").textContent = error.message;
+  }
+}
+
+async function resetDemo() {
+  try {
+    const pair = $("#pairSelect").value || state.market?.pair || "EUR/USD";
+    await api(`/api/reset-demo?pair=${encodeURIComponent(pair)}`, { method: "POST" });
+    $("#importStatus").textContent = "Synthetic demo restored; archived CSV datasets remain. Live feed automation is paused until you explicitly sync it again.";
+    await Promise.all([loadMarket(), refreshHistory(), refreshStorageSummary()]);
+    scheduleAutomaticBacktest();
+  } catch (error) {
+    $("#importStatus").textContent = error.message;
+  }
+}
+
+async function resolvePaperSignal(signalId, button) {
+  const input = document.querySelector(`[data-exit-for="${CSS.escape(signalId)}"]`);
+  const exitPrice = Number(input?.value);
+  if (!(exitPrice > 0)) {
+    $("#paperLogStatus").textContent = "Enter a valid manually observed expiry price first.";
+    input?.focus();
+    return;
+  }
+  button.disabled = true;
+  $("#paperLogStatus").textContent = "Saving paper outcome…";
+  try {
+    const result = await api("/api/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ signal_id: signalId, exit_price: exitPrice }),
+    });
+    $("#paperLogStatus").textContent = result.learned_from_confirmed_paper_result
+      ? `Paper result saved: ${result.outcome}. Model updated from this confirmed result.`
+      : `Paper result saved: ${result.outcome}. ${result.note}`;
+    await Promise.all([refreshHistory(), refreshStorageSummary()]);
+  } catch (error) {
+    $("#paperLogStatus").textContent = error.message;
+    button.disabled = false;
+  }
+}
+
+async function refreshHistory() {
+  try {
+    const data = await api("/api/signals");
+    const tbody = $("#historyRows");
+    if (!data.signals.length) {
+      tbody.innerHTML = '<tr><td colspan="7" class="empty-row">No generated BUY/SELL signals yet.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = data.signals.map((row) => {
+      const canResolve = row.can_resolve === true;
+      const paperAction = canResolve
+        ? `<div class="paper-exit-cell"><input class="paper-exit-input" type="number" min="0" step="any" placeholder="Exit price" aria-label="Manual expiry price for ${escapeHtml(row.pair)}" data-exit-for="${escapeHtml(row.signal_id)}"><button class="paper-resolve-button" data-resolve-id="${escapeHtml(row.signal_id)}">SAVE</button></div>`
+        : row.source === "SYNTHETIC DEMO" ? "DEMO ONLY" : row.status === "PENDING" && row.source === "IMPORTED CSV" ? "SELECT DATASET" : "—";
+      const result = row.outcome ? ` · ${escapeHtml(row.outcome)}` : "";
+      return `
+        <tr>
+          <td>${escapeHtml(row.pair)}</td>
+          <td>${escapeHtml(row.strategy.replaceAll("_", " "))}</td>
+          <td>${escapeHtml(row.side)}</td>
+          <td>${compactTime(row.entry_time || row.generated_at)}</td>
+          <td>${compactTime(row.prediction_time || row.expires_at)}</td>
+          <td>${escapeHtml(row.status)}${result}</td>
+          <td>${paperAction}</td>
+        </tr>`;
+    }).join("");
+  } catch (_) { /* the main screen remains usable if the paper log is unavailable */ }
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
+}
+
+async function loadStrategies() {
+  try {
+    const data = await api("/api/strategies");
+    state.strategies = data;
+    const select = $("#strategySelect");
+    select.innerHTML = data.executable.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`).join("");
+    $("#prototypeList").innerHTML = data.executable.map((item) => `
+      <div class="prototype-item"><span>${escapeHtml(item.name)}</span><span>PROTOTYPE</span></div>`).join("");
+    $("#catalogList").innerHTML = data.candidates.map((item) => `
+      <div class="catalog-row"><span class="catalog-number">${String(item.number).padStart(2, "0")}</span><span>${escapeHtml(item.name)}</span><span class="catalog-status">${escapeHtml(item.status)}</span></div>`).join("");
+  } catch (_) { /* default option remains */ }
+}
+
+const PROVIDER_CARDS = [
+  {
+    provider: "market",
+    state: "#marketCredentialState",
+    note: "#marketCredentialNote",
+    inputs: [{ selector: "#twelveDataKey", field: "twelve_data_api_key", placeholder: "Paste the Twelve Data API key" }],
+    fallback: "Used for completed M1 candles. Without it the live feed stays off; imported CSV data still works.",
+  },
+  {
+    provider: "calendar",
+    state: "#calendarCredentialState",
+    note: "#calendarCredentialNote",
+    inputs: [{ selector: "#finnhubKey", field: "finnhub_api_key", placeholder: "Paste the Finnhub API key" }],
+    fallback: "Used to pause signals around high-impact events. Calendar access may require a paid Finnhub plan.",
+  },
+  {
+    provider: "telegram",
+    state: "#telegramCredentialState",
+    note: "#telegramCredentialNote",
+    inputs: [
+      { selector: "#telegramBotToken", field: "telegram_bot_token", placeholder: "Paste the bot token from BotFather" },
+      { selector: "#telegramChatId", field: "telegram_chat_id", placeholder: "e.g. -1001234567890" },
+    ],
+    fallback: "The bot must be an administrator of the channel with permission to post messages.",
+  },
+];
+
+function providerStateText(provider) {
+  if (!provider) return "UNKNOWN";
+  if (!provider.configured) return "NOT CONNECTED";
+  if (provider.accessible === true) return "ACCESSIBLE";
+  if (provider.accessible === false) return "NOT ACCESSIBLE";
+  return "SAVED · NOT TESTED";
+}
+
+function renderCreditDashboard() {
+  const payload = state.providers;
+  const providers = payload?.providers ? Object.values(payload.providers) : [];
+  const configured = providers.filter((provider) => provider.configured).length;
+  const accessible = providers.filter((provider) => provider.accessible === true).length;
+  const count = providers.length ? `${configured} / ${providers.length}` : "— / —";
+  $("#creditTriggerCount").textContent = count;
+  $("#creditKeyCount").textContent = count;
+  $("#creditUsed").textContent = providers.length ? String(accessible) : "—";
+  $("#creditLimit").textContent = providers.length ? String(providers.length) : "—";
+  $("#creditPopupNote").textContent = providers.length
+    ? "Provider quota data is not exposed by these providers, so usage limits cannot be shown. The counts below reflect credentials saved on this server and whether the last access test reached each provider; no quota request is made."
+    : "Provider status is unavailable until the server reports it. No quota request is being made.";
+
+  const rows = $("#creditKeyRows");
+  rows.replaceChildren();
+  if (!providers.length) {
+    const empty = document.createElement("p");
+    empty.className = "credit-key-empty";
+    empty.textContent = "No provider status loaded yet.";
+    rows.append(empty);
+    return;
+  }
+  Object.entries(payload.providers).forEach(([key, provider]) => {
+    const row = document.createElement("div");
+    row.className = "credit-key-row";
+    const identity = document.createElement("div");
+    identity.className = "credit-key-identity";
+    const name = document.createElement("span");
+    name.className = "credit-key-name";
+    name.textContent = provider.label || key;
+    const mask = document.createElement("span");
+    mask.className = "credit-key-mask";
+    mask.textContent = provider.configured ? provider.masked || "saved" : "not saved";
+    identity.append(name, mask);
+    const quota = document.createElement("span");
+    quota.className = "credit-key-quota";
+    quota.textContent = providerStateText(provider);
+    row.title = provider.message || "";
+    row.setAttribute("aria-label", `${name.textContent}: ${providerStateText(provider)}`);
+    row.append(identity, quota);
+    rows.append(row);
+  });
+}
+
+function setCreditPopupOpen(open) {
+  const trigger = $("#creditDashboardTrigger");
+  $("#creditDashboardPopup").hidden = !open;
+  trigger.setAttribute("aria-expanded", String(open));
+}
+
+function renderTelegramFeedState() {
+  const strong = $("#telegramFeedState");
+  const small = $("#telegramFeedMessage");
+  if (!strong || !small) return;
+  const provider = state.providers?.providers?.telegram;
+  if (!provider) {
+    strong.textContent = "STATUS UNKNOWN";
+    small.textContent = "The server has not reported provider status yet.";
+    return;
+  }
+  strong.textContent = providerStateText(provider);
+  small.textContent = provider.configured
+    ? provider.message
+    : "Save a bot token and channel id to enable posting.";
+}
+
+function renderProviderStatus(summary = "") {
+  const payload = state.providers;
+  if (!payload) return;
+  const fields = payload.fields || {};
+  const providers = payload.providers || {};
+
+  PROVIDER_CARDS.forEach((card) => {
+    const provider = providers[card.provider];
+    const stateNode = $(card.state);
+    const noteNode = $(card.note);
+    if (stateNode) {
+      const text = providerStateText(provider);
+      stateNode.textContent = text;
+      stateNode.classList.toggle("is-accessible", text === "ACCESSIBLE");
+      stateNode.classList.toggle("is-blocked", text === "NOT ACCESSIBLE");
+    }
+    card.inputs.forEach((input) => {
+      const node = $(input.selector);
+      if (!node) return;
+      const field = fields[input.field];
+      if (field?.source === "environment") {
+        node.value = "";
+        node.disabled = true;
+        node.placeholder = "Provided by the server environment";
+      } else {
+        node.disabled = false;
+        node.placeholder = field?.configured
+          ? `Saved ${field.masked} — leave blank to keep`
+          : input.placeholder;
+      }
+    });
+    if (noteNode) {
+      if (!provider) {
+        noteNode.textContent = card.fallback;
+      } else if (!provider.configured) {
+        noteNode.textContent = provider.message;
+      } else {
+        const source = provider.source === "environment" ? "server environment" : "saved on this server";
+        const checked = provider.checked_at ? ` · last test ${compactTime(provider.checked_at)}` : "";
+        noteNode.textContent = `${provider.message}${provider.masked ? ` · ${provider.masked}` : ""} · ${source}${checked}`;
+      }
+    }
+  });
+
+  const configured = Object.values(providers).filter((provider) => provider.configured).length;
+  const accessible = Object.values(providers).filter((provider) => provider.accessible === true).length;
+  const tag = $("#providerPanelTag");
+  if (tag) {
+    tag.textContent = accessible === 3 ? "ALL ACCESSIBLE" : configured ? `${configured} / 3 SAVED` : "NOT CONNECTED";
+    tag.classList.toggle("is-configured", accessible === 3);
+    tag.classList.toggle("is-pending", configured > 0 && accessible < 3);
+  }
+  const statusNode = $("#providerFormStatus");
+  if (statusNode) {
+    const base = payload.stored
+      ? `${configured} of 3 providers are configured; ${accessible} passed the last access test. Keys marked “server environment” are managed outside this page.`
+      : "No credentials saved on this server yet. Server environment variables, when present, take precedence.";
+    statusNode.textContent = summary || base;
+  }
+  renderTelegramFeedState();
+  renderCreditDashboard();
+}
+
+async function loadProviders() {
+  if (state.providersBusy) return;
+  state.providersBusy = true;
+  try {
+    const payload = await api("/api/providers");
+    state.providers = payload;
+    renderProviderStatus();
+  } catch (error) {
+    const statusNode = $("#providerFormStatus");
+    if (statusNode) statusNode.textContent = `Provider status unavailable: ${error.message}`;
+  } finally {
+    state.providersBusy = false;
+  }
+}
+
+function providerFormValues() {
+  const values = {};
+  PROVIDER_CARDS.forEach((card) => {
+    card.inputs.forEach((input) => {
+      const node = $(input.selector);
+      if (!node || node.disabled) return;
+      const value = node.value.trim();
+      if (value) values[input.field] = value;
+    });
+  });
+  return values;
+}
+
+function setProviderButtonsBusy(busy, action) {
+  const save = $("#saveProviderButton");
+  const test = $("#testProviderButton");
+  const clear = $("#clearProviderButton");
+  if (save) {
+    save.disabled = busy;
+    save.innerHTML = busy && action === "save" ? "SAVING…" : 'SAVE &amp; APPLY <span class="button-arrow">↗</span>';
+  }
+  if (test) {
+    test.disabled = busy;
+    test.innerHTML = busy && action === "test"
+      ? "<span>TESTING…</span><span class=\"button-arrow\">↻</span>"
+      : '<span>TEST ACCESS</span><span class="button-arrow">↻</span>';
+  }
+  if (clear) clear.disabled = busy;
+}
+
+async function saveProviderConfiguration() {
+  const values = providerFormValues();
+  if (!Object.keys(values).length) {
+    $("#providerFormStatus").textContent = "Enter at least one credential. Fields left blank keep their saved value.";
+    return;
+  }
+  setProviderButtonsBusy(true, "save");
+  $("#providerFormStatus").textContent = "Saving credentials on the server…";
+  try {
+    const payload = await api("/api/providers", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(values),
+    });
+    state.providers = payload;
+    Object.keys(values).forEach((field) => {
+      const card = PROVIDER_CARDS.find((item) => item.inputs.some((input) => input.field === field));
+      card?.inputs.filter((input) => input.field === field).forEach((input) => { $(input.selector).value = ""; });
+    });
+    renderProviderStatus("Credentials saved and applied. Checking provider access…");
+    void refreshAutomationStatus();
+    setProviderButtonsBusy(false);
+    await testProviderConfiguration(true);
+  } catch (error) {
+    $("#providerFormStatus").textContent = `Save failed: ${error.message}`;
+  } finally {
+    setProviderButtonsBusy(false);
+  }
+}
+
+async function testProviderConfiguration(auto = false) {
+  setProviderButtonsBusy(true, "test");
+  $("#providerFormStatus").textContent = "Testing each configured provider. No messages are posted and no candles are stored; each test may use one provider request…";
+  try {
+    const payload = await api("/api/providers/test", { method: "POST" });
+    state.providers = payload;
+    const accessible = Object.values(payload.providers || {}).filter((provider) => provider.accessible === true).length;
+    const configured = Object.values(payload.providers || {}).filter((provider) => provider.configured).length;
+    renderProviderStatus(`${auto ? "Credentials saved. " : ""}Access test finished: ${accessible} of ${configured} configured provider${configured === 1 ? "" : "s"} reachable.`);
+  } catch (error) {
+    $("#providerFormStatus").textContent = `Access test failed: ${error.message}`;
+  } finally {
+    setProviderButtonsBusy(false);
+  }
+}
+
+function armProviderClear() {
+  const button = $("#clearProviderButton");
+  if (state.providerClearArmed) {
+    window.clearTimeout(state.providerClearTimer);
+    state.providerClearArmed = false;
+    return true;
+  }
+  state.providerClearArmed = true;
+  button.textContent = "CLICK AGAIN TO CLEAR";
+  $("#providerFormStatus").textContent = "This removes keys saved from this page; server environment keys are kept. Click again within 5 seconds to confirm.";
+  state.providerClearTimer = window.setTimeout(() => {
+    state.providerClearArmed = false;
+    button.textContent = "CLEAR SAVED KEYS";
+    void loadProviders();
+  }, 5000);
+  return false;
+}
+
+async function clearProviderConfiguration() {
+  if (!armProviderClear()) return;
+  const button = $("#clearProviderButton");
+  button.disabled = true;
+  $("#providerFormStatus").textContent = "Removing saved keys…";
+  try {
+    const payload = await api("/api/providers", { method: "DELETE" });
+    state.providerClearArmed = false;
+    state.providers = payload;
+    PROVIDER_CARDS.forEach((card) => card.inputs.forEach((input) => { const node = $(input.selector); if (node) node.value = ""; }));
+    renderProviderStatus("Saved keys removed. Keys supplied by the server environment are unchanged.");
+    void refreshAutomationStatus();
+  } catch (error) {
+    $("#providerFormStatus").textContent = `Clear failed: ${error.message}`;
+  } finally {
+    button.disabled = false;
+    button.textContent = "CLEAR SAVED KEYS";
+  }
+}
+
+function utcClock(value, includeDate = false) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat(undefined, {
+    timeZone: "UTC",
+    ...(includeDate ? { day: "2-digit", month: "short" } : {}),
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date);
+}
+
+function streakLabel(streak) {
+  const value = Number(streak) || 0;
+  if (!value) return "flat";
+  return value > 0 ? `${value} win${value === 1 ? "" : "s"} in a row` : `${-value} loss${value === -1 ? "" : "es"} in a row`;
+}
+
+function renderTraderRules(status) {
+  const list = $("#traderRules");
+  list.replaceChildren();
+  const rules = status.rules || {};
+  const items = [
+    `Trade only ${status.sessions || "the configured hours"} UTC${status.weekdays_only ? ", Monday to Friday" : ""}.`,
+    `At most ${status.budget?.max ?? "—"} paper trades per day, at least ${rules.min_spacing_minutes ?? "—"} minutes apart.`,
+    `Leave the first ${rules.open_quiet_minutes ?? 0} minutes of a session alone.`,
+    `${rules.cooldown_after_losses ?? 2} losses in a row means ${rules.cooldown_minutes ?? 30} minutes off.`,
+    `${status.max_daily_losses ?? "—"} losses in a day ends the day.`,
+    `Avoid a strategy and session only after ${rules.context_min_samples ?? 20} resolved trades below ${Math.round((rules.context_min_win_rate ?? 0.45) * 100)}%.`,
+    "One open paper trade at a time.",
+  ];
+  for (const text of items) {
+    const item = document.createElement("li");
+    item.textContent = text;
+    list.appendChild(item);
+  }
+}
+
+function renderTraderPage(payload) {
+  const status = payload.status || {};
+  const idle = status.apply_rules === false;
+  $("#traderState").textContent = idle ? "RULES IDLE" : status.awake ? "AWAKE" : "ASLEEP";
+  $("#traderSession").textContent = status.window || "Outside session";
+  $("#traderNote").textContent = status.note || "No discipline note.";
+  $("#traderWindows").textContent = `${status.sessions || "—"} UTC`;
+  $("#traderNextOpen").textContent = status.awake ? "—" : (status.next_open ? `${utcClock(status.next_open, true)} UTC` : "—");
+  const budget = status.budget || {};
+  $("#traderBudget").textContent = `${budget.used ?? "—"} / ${budget.max ?? "—"} used`;
+  $("#traderLosses").textContent = `${status.losses_today ?? 0} / ${status.max_daily_losses ?? "—"}`;
+  $("#traderStreak").textContent = streakLabel(status.streak);
+  const waits = [];
+  if (status.cooldown_until) waits.push(`cool-off until ${utcClock(status.cooldown_until)} UTC`);
+  if (status.spacing_until && Date.parse(status.spacing_until) > Date.now()) waits.push(`next entry after ${utcClock(status.spacing_until)} UTC`);
+  $("#traderWait").textContent = waits.length ? waits.join(" · ") : "—";
+  $("#traderGradeNote").textContent = status.grade_note || "Conviction is a label, not a probability of profit.";
+  const configError = $("#traderConfigError");
+  configError.hidden = !status.config_error;
+  configError.textContent = status.config_error || "";
+
+  const reviews = payload.reviews || [];
+  const today = reviews[reviews.length - 1] || {};
+  $("#traderReviewDate").textContent = today.date || "—";
+  $("#traderReviewSummary").textContent = today.summary || "No trades reviewed yet.";
+  $("#traderReviewTrades").textContent = Number(today.trades || 0).toLocaleString();
+  $("#traderReviewRecord").textContent = `${today.wins ?? 0} / ${today.losses ?? 0}${today.ties ? ` · ${today.ties} tie` : ""}`;
+  $("#traderReviewPips").textContent = today.net_pips == null ? "—" : `${today.net_pips > 0 ? "+" : ""}${Number(today.net_pips).toFixed(1)}`;
+  $("#traderReviewRate").textContent = today.accuracy == null ? "—" : `${Math.round(today.accuracy * 100)}%`;
+  $("#traderReviewLesson").textContent = today.lesson || "A small sample is not a verdict.";
+
+  const journal = (payload.journal || []).slice().reverse();
+  const body = $("#traderJournalRows");
+  body.replaceChildren();
+  if (!journal.length) {
+    const row = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = 2;
+    cell.className = "empty-row";
+    cell.textContent = "No journal entries yet. It will write down every taken trade and every meaningful pass.";
+    row.appendChild(cell);
+    body.appendChild(row);
+  } else {
+    for (const entry of journal) {
+      const row = document.createElement("tr");
+      const when = document.createElement("td");
+      when.textContent = utcClock(entry.at, true);
+      const note = document.createElement("td");
+      note.textContent = entry.detail;
+      row.append(when, note);
+      body.appendChild(row);
+    }
+  }
+
+  const contexts = payload.contexts || [];
+  $("#traderContextCount").textContent = `${contexts.length} CONTEXT${contexts.length === 1 ? "" : "S"}`;
+  const contextBody = $("#traderContextRows");
+  contextBody.replaceChildren();
+  if (!contexts.length) {
+    const row = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = 5;
+    cell.className = "empty-row";
+    cell.textContent = "No resolved real or paper trades yet.";
+    row.appendChild(cell);
+    contextBody.appendChild(row);
+  } else {
+    for (const context of contexts) {
+      const row = document.createElement("tr");
+      const values = [
+        context.strategy || "—",
+        context.session || "—",
+        Number(context.total || 0).toLocaleString(),
+        context.win_rate == null ? "—" : `${Math.round(context.win_rate * 100)}%`,
+        context.note || (context.cautious ? "Avoid this context." : "No action."),
+      ];
+      for (const value of values) {
+        const cell = document.createElement("td");
+        cell.textContent = value;
+        row.appendChild(cell);
+      }
+      contextBody.appendChild(row);
+    }
+  }
+  renderTraderRules(status);
+}
+
+async function loadTraderPage() {
+  try {
+    const payload = await api("/api/trader?days=7");
+    state.trader = payload;
+    renderTraderPage(payload);
+  } catch (error) {
+    $("#traderState").textContent = "UNAVAILABLE";
+    $("#traderNote").textContent = `Discipline state unavailable: ${error.message}`;
+  }
+}
+
+function setActivePage(route, shouldScroll = true) {
+  if (!Object.hasOwn(ROUTES, route)) route = "dashboard";
+  state.route = route;
+  document.querySelectorAll(".page-view").forEach((page) => {
+    const active = page.dataset.page === route;
+    page.hidden = !active;
+    page.classList.toggle("is-active", active);
+    if (active) {
+      page.classList.remove("is-active");
+      void page.offsetWidth;
+      page.classList.add("is-active");
+    }
+  });
+  document.querySelectorAll(".top-nav [data-route]").forEach((link) => {
+    const active = link.dataset.route === route;
+    link.classList.toggle("active", active);
+    if (active) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
+  });
+  document.title = `${ROUTES[route]} — Orbix Signal Lab`;
+  if (shouldScroll) window.scrollTo({ top: 0, behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  if (route === "dashboard") {
+    if (state.market) requestAnimationFrame(() => drawChart(state.market.candles));
+    startBlackholeAnimation();
+  } else {
+    stopBlackholeAnimation();
+  }
+  if (route === "backtest") {
+    if (state.market) void loadMarket();
+    scheduleAutomaticBacktest();
+  }
+  if (route === "future") void loadFuturePlan();
+  if (route === "telegram") void refreshTelegramPage();
+  if (route === "trader") void loadTraderPage();
+  if (route === "connections") void loadProviders();
+  if (route === "engine") void loadModelCard();
+}
+
+function handleRouteChange() {
+  setCreditPopupOpen(false);
+  const route = window.location.hash.slice(1);
+  if (!Object.hasOwn(ROUTES, route)) {
+    window.history.replaceState(null, "", "#dashboard");
+    setActivePage("dashboard", false);
+    return;
+  }
+  setActivePage(route);
+}
+
+let blackholeCanvas = null;
+let blackholeContext = null;
+let blackholeWidth = 0;
+let blackholeHeight = 0;
+let blackholeRatio = 1;
+let blackholeStars = [];
+let blackholeFrame = 0;
+const prefersReducedMotion = typeof window.matchMedia === "function"
+  ? window.matchMedia("(prefers-reduced-motion: reduce)")
+  : { matches: false, addEventListener() {}, addListener() {}, removeEventListener() {}, removeListener() {} };
+const TAU = Math.PI * 2;
+
+function createBlackholeStars() {
+  blackholeStars = Array.from({ length: 92 }, (_, index) => {
+    const seed = index + 1;
+    const x = (Math.sin(seed * 127.1) * 43758.5453) % 1;
+    const y = (Math.sin(seed * 311.7) * 19642.349) % 1;
+    return {
+      x: Math.abs(x),
+      y: Math.abs(y),
+      radius: .35 + (index % 4) * .22,
+      phase: index * 1.73,
+      alpha: .12 + (index % 5) * .045,
+    };
+  });
+}
+
+function sizeBlackholeCanvas() {
+  if (!blackholeCanvas || !blackholeContext) return;
+  const rect = blackholeCanvas.getBoundingClientRect();
+  if (rect.width < 2 || rect.height < 2) return;
+  blackholeWidth = rect.width;
+  blackholeHeight = rect.height;
+  blackholeRatio = Math.min(window.devicePixelRatio || 1, 2);
+  blackholeCanvas.width = Math.round(blackholeWidth * blackholeRatio);
+  blackholeCanvas.height = Math.round(blackholeHeight * blackholeRatio);
+  blackholeContext.setTransform(blackholeRatio, 0, 0, blackholeRatio, 0, 0);
+  createBlackholeStars();
+  drawBlackhole(0);
+}
+
+function drawBlackhole(time) {
+  if (!blackholeContext || blackholeWidth < 2 || blackholeHeight < 2) return;
+  const ctx = blackholeContext;
+  const width = blackholeWidth;
+  const height = blackholeHeight;
+  const centerX = width * .53;
+  const centerY = height * .5;
+  const radius = Math.min(width, height) * .135;
+  const spin = time * .00012;
+  ctx.clearRect(0, 0, width, height);
+
+  for (const star of blackholeStars) {
+    const flicker = .78 + .22 * Math.sin(time * .001 + star.phase);
+    ctx.fillStyle = `rgba(255,255,255,${star.alpha * flicker})`;
+    ctx.beginPath();
+    ctx.arc(star.x * width, star.y * height, star.radius, 0, TAU);
+    ctx.fill();
+  }
+
+  const glow = ctx.createRadialGradient(centerX, centerY, radius * .5, centerX, centerY, radius * 4.5);
+  glow.addColorStop(0, "rgba(255,255,255,.11)");
+  glow.addColorStop(.28, "rgba(255,255,255,.055)");
+  glow.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = glow;
+  ctx.fillRect(centerX - radius * 5, centerY - radius * 5, radius * 10, radius * 10);
+
+  // Elliptical accretion disk, orbiting particles, and a dark event horizon.
+  ctx.save();
+  ctx.translate(centerX, centerY);
+  ctx.rotate(-.13);
+  ctx.scale(1, .39);
+  ctx.globalCompositeOperation = "lighter";
+  const diskGlow = ctx.createRadialGradient(0, 0, radius * .85, 0, 0, radius * 3.25);
+  diskGlow.addColorStop(0, "rgba(255,255,255,0)");
+  diskGlow.addColorStop(.22, "rgba(255,255,255,.11)");
+  diskGlow.addColorStop(.43, "rgba(255,255,255,.035)");
+  diskGlow.addColorStop(.67, "rgba(255,255,255,.14)");
+  diskGlow.addColorStop(.76, "rgba(255,255,255,.045)");
+  diskGlow.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = diskGlow;
+  ctx.beginPath();
+  ctx.arc(0, 0, radius * 3.25, 0, TAU);
+  ctx.fill();
+
+  for (let ring = 0; ring < 5; ring++) {
+    const ringRadius = radius * (1.45 + ring * .31);
+    ctx.beginPath();
+    ctx.ellipse(0, 0, ringRadius, ringRadius, 0, 0, TAU);
+    ctx.strokeStyle = `rgba(255,255,255,${.1 + (ring % 2) * .07})`;
+    ctx.lineWidth = ring === 1 ? 1.25 : .65;
+    ctx.stroke();
+  }
+
+  for (let particle = 0; particle < 150; particle++) {
+    const fraction = particle / 150;
+    const orbit = radius * (1.35 + ((particle * 17) % 100) / 100 * 1.75);
+    const angularSpeed = .34 + (particle % 9) * .025;
+    const angle = fraction * TAU * 8 + spin * angularSpeed * 10;
+    const px = Math.cos(angle) * orbit;
+    const py = Math.sin(angle) * orbit;
+    const hotSide = .2 + .8 * (Math.cos(angle + .6) + 1) / 2;
+    const opacity = Math.min(.8, (.19 + (particle % 5) * .08) * hotSide);
+    ctx.fillStyle = `rgba(255,255,255,${opacity})`;
+    ctx.beginPath();
+    ctx.arc(px, py, .45 + (particle % 4) * .21, 0, TAU);
+    ctx.fill();
+  }
+  ctx.restore();
+
+  ctx.save();
+  ctx.translate(centerX, centerY);
+  ctx.rotate(-.13);
+  ctx.beginPath();
+  ctx.ellipse(0, 0, radius * 1.34, radius * .53, 0, Math.PI * .08, Math.PI * .92);
+  const photonArc = ctx.createLinearGradient(-radius * 1.3, 0, radius * 1.3, 0);
+  photonArc.addColorStop(0, "rgba(255,255,255,0)");
+  photonArc.addColorStop(.45, "rgba(255,255,255,.06)");
+  photonArc.addColorStop(.71, "rgba(255,255,255,.8)");
+  photonArc.addColorStop(1, "rgba(255,255,255,.05)");
+  ctx.strokeStyle = photonArc;
+  ctx.lineWidth = 1.1;
+  ctx.shadowBlur = 11;
+  ctx.shadowColor = "rgba(255,255,255,.75)";
+  ctx.stroke();
+  ctx.restore();
+
+  const horizon = ctx.createRadialGradient(centerX - radius * .3, centerY - radius * .36, radius * .05, centerX, centerY, radius * 1.08);
+  horizon.addColorStop(0, "#252525");
+  horizon.addColorStop(.28, "#090909");
+  horizon.addColorStop(.72, "#010101");
+  horizon.addColorStop(1, "#000000");
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, radius, 0, TAU);
+  ctx.fillStyle = horizon;
+  ctx.shadowBlur = 19;
+  ctx.shadowColor = "rgba(255,255,255,.23)";
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = "rgba(255,255,255,.44)";
+  ctx.lineWidth = .75;
+  ctx.stroke();
+
+  // A slowly sweeping lens flare catches the outer photon ring.
+  const flareAngle = spin * .55 - .35;
+  const flareX = centerX + Math.cos(flareAngle) * radius * 1.33;
+  const flareY = centerY + Math.sin(flareAngle) * radius * .52;
+  const flare = ctx.createRadialGradient(flareX, flareY, 0, flareX, flareY, radius * .45);
+  flare.addColorStop(0, "rgba(255,255,255,.5)");
+  flare.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = flare;
+  ctx.beginPath();
+  ctx.arc(flareX, flareY, radius * .45, 0, TAU);
+  ctx.fill();
+}
+
+function initializeBlackholeAnimation() {
+  blackholeCanvas = $("#blackholeCanvas");
+  blackholeContext = blackholeCanvas?.getContext("2d") || null;
+  if (blackholeContext) sizeBlackholeCanvas();
+}
+
+function animateBlackhole(time) {
+  drawBlackhole(time);
+  blackholeFrame = window.requestAnimationFrame(animateBlackhole);
+}
+
+function stopBlackholeAnimation() {
+  if (blackholeFrame) window.cancelAnimationFrame(blackholeFrame);
+  blackholeFrame = 0;
+}
+
+function startBlackholeAnimation() {
+  stopBlackholeAnimation();
+  sizeBlackholeCanvas();
+  if (state.route === "dashboard" && !document.hidden && !prefersReducedMotion.matches) {
+    blackholeFrame = window.requestAnimationFrame(animateBlackhole);
+  }
+}
+
+function telegramDeliveryLabel(signalId, data) {
+  const results = new Set(data?.sent_result_ids || []);
+  const edited = new Set(data?.edited_result_ids || []);
+  if (results.has(signalId)) return edited.has(signalId) ? "EDITED" : "RESULT";
+  const sent = new Set(data?.sent_signal_ids || []);
+  return sent.has(signalId) ? "SENT" : "QUEUED";
+}
+
+function renderTelegramStatus(data) {
+  state.telegram = data;
+  const configured = Boolean(data.configured);
+  const modeTag = $("#telegramModeTag");
+  if (modeTag) modeTag.textContent = configured ? "CONNECTED" : "NOT CONFIGURED";
+  const indicator = $("#telegramIndicator");
+  if (indicator) {
+    indicator.classList.toggle("is-configured", configured);
+    indicator.classList.toggle("is-pending", !configured);
+  }
+  const target = $("#telegramTarget");
+  if (target) target.textContent = data.target_chat || "NOT SET";
+  const message = $("#telegramStateMessage");
+  if (message) {
+    message.textContent = configured
+      ? `Admin bot ready · automatic posting ${data.auto_post_enabled ? "ON" : "OFF"} · ${data.timezone}`
+      : "Set ORBIX_TELEGRAM_BOT_TOKEN and ORBIX_TELEGRAM_CHAT_ID on the server, then restart.";
+  }
+  const tokenState = $("#telegramTokenState");
+  if (tokenState) tokenState.textContent = configured ? "CONFIGURED (HIDDEN)" : "NOT CONFIGURED";
+  const chatState = $("#telegramChatState");
+  if (chatState) chatState.textContent = configured ? "CONFIGURED" : "NOT CONFIGURED";
+  const timezoneState = $("#telegramTimezoneState");
+  if (timezoneState) timezoneState.textContent = data.timezone || "UTC";
+  const autoState = $("#telegramAutoState");
+  if (autoState) autoState.textContent = data.auto_post_enabled ? "ON" : "OFF";
+  const capState = $("#telegramCapState");
+  if (capState) capState.textContent = `${Number(data.sent_today || 0)} / ${Number(data.daily_cap || 0)} today`;
+  const cooldownState = $("#telegramCooldownState");
+  if (cooldownState) cooldownState.textContent = `${Number(data.cooldown_seconds || 0)} seconds`;
+  const limitNote = $("#telegramLimitNote");
+  if (limitNote) {
+    limitNote.textContent = data.auto_post_block_reason
+      ? `Automatic posting held: ${data.auto_post_block_reason}`
+      : `Automatic posting stops at ${data.daily_cap} messages/day and waits ${data.cooldown_seconds}s between posts. Manual sends count toward the cap.`;
+  }
+  ["#telegramSendLatest", "#telegramSendBatch", "#telegramTest"].forEach((selector) => {
+    const button = $(selector);
+    if (button) button.disabled = !configured || state.telegramBusy;
+  });
+  const autoToggle = $("#telegramAutoPost");
+  if (autoToggle) {
+    autoToggle.checked = Boolean(data.auto_post_enabled);
+    autoToggle.disabled = !configured;
+  }
+  const rows = $("#telegramLogRows");
+  if (rows) {
+    rows.replaceChildren();
+    const signals = data.recent_signals || [];
+    if (!signals.length) {
+      const row = document.createElement("tr");
+      const cell = document.createElement("td");
+      cell.colSpan = 5;
+      cell.className = "empty-row";
+      cell.textContent = "No automatic signals recorded yet.";
+      row.append(cell);
+      rows.append(row);
+    } else {
+      signals.slice().reverse().forEach((signal) => {
+        const row = document.createElement("tr");
+        const entry = document.createElement("td");
+        entry.textContent = compactTime(signal.entry_time);
+        const pair = document.createElement("td");
+        pair.textContent = signal.pair || "—";
+        const direction = document.createElement("td");
+        direction.textContent = signal.side === "BUY" ? "CALL" : signal.side === "SELL" ? "PUT" : "ABSTAIN";
+        const probability = document.createElement("td");
+        probability.textContent = signal.probability_up == null ? "—" : `${(Number(signal.probability_up) * 100).toFixed(1)}%`;
+        const delivery = document.createElement("td");
+        const chip = document.createElement("span");
+        const label = telegramDeliveryLabel(signal.signal_id, data);
+        chip.className = `telegram-delivery-chip${label === "QUEUED" ? "" : " is-sent"}`;
+        chip.textContent = label;
+        delivery.append(chip);
+        row.append(entry, pair, direction, probability, delivery);
+        rows.append(row);
+      });
+    }
+  }
+  if (data.last_error) {
+    const status = $("#telegramSendStatus");
+    if (status) status.textContent = `Last delivery error: ${data.last_error}`;
+  }
+}
+
+async function refreshTelegramPage(options = {}) {
+  try {
+    const data = await api("/api/telegram/status");
+    renderTelegramStatus(data);
+    if (options.announce) {
+      const status = $("#telegramSendStatus");
+      if (status) status.textContent = data.configured ? "Channel status refreshed." : "Bot credentials are not configured on the server yet.";
+    }
+  } catch (error) {
+    const status = $("#telegramSendStatus");
+    if (status) status.textContent = error.message;
+  }
+}
+
+function setTelegramBusy(busy, message) {
+  state.telegramBusy = busy;
+  ["#telegramSendLatest", "#telegramSendBatch", "#telegramTest"].forEach((selector) => {
+    const button = $(selector);
+    if (button) button.disabled = busy || !state.telegram?.configured;
+  });
+  const status = $("#telegramSendStatus");
+  if (status && message) status.textContent = message;
+}
+
+async function sendTelegramSignals(kind) {
+  if (state.telegramBusy) return;
+  const includeDemo = Boolean($("#telegramIncludeDemo")?.checked);
+  if (kind === "test") {
+    setTelegramBusy(true, "Sending a connection test…");
+    try {
+      const result = await api("/api/telegram/test", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      setTelegramBusy(false, `Connection test delivered to ${result.chat_id} (message ${result.message_id}).`);
+      await refreshTelegramPage();
+    } catch (error) {
+      setTelegramBusy(false, `Test failed: ${error.message}`);
+    }
+    return;
+  }
+  const limit = kind === "batch" ? 5 : 1;
+  setTelegramBusy(true, kind === "batch" ? "Sending the latest unsent signals…" : "Sending the latest signal…");
+  try {
+    const result = await api("/api/telegram/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ limit, include_demo: includeDemo }),
+    });
+    if (result.status === "nothing_to_send") {
+      setTelegramBusy(false, result.message || "No unsent signals are available.");
+    } else {
+      setTelegramBusy(false, `Delivered ${result.sent.length} signal(s) · message ${result.message_id}.`);
+    }
+    await refreshTelegramPage();
+  } catch (error) {
+    setTelegramBusy(false, `Send failed: ${error.message}`);
+  }
+}
+
+async function previewTelegramMessage() {
+  const includeDemo = Boolean($("#telegramIncludeDemo")?.checked);
+  const output = $("#telegramPreviewText");
+  try {
+    const result = await api("/api/telegram/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ limit: 1, include_demo: includeDemo, dry_run: true }),
+    });
+    if (!output) return;
+    if (result.status === "nothing_to_send") {
+      output.hidden = false;
+      output.textContent = result.message || "No signal is available to preview.";
+    } else {
+      output.hidden = false;
+      output.textContent = result.text;
+    }
+  } catch (error) {
+    if (output) {
+      output.hidden = false;
+      output.textContent = error.message;
+    }
+  }
+}
+
+async function toggleTelegramAutoPost() {
+  const toggle = $("#telegramAutoPost");
+  if (!toggle) return;
+  const desired = toggle.checked;
+  toggle.disabled = true;
+  try {
+    const data = await api("/api/telegram/auto", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: desired }),
+    });
+    renderTelegramStatus({ ...state.telegram, ...data });
+    const status = $("#telegramSendStatus");
+    if (status) status.textContent = data.auto_post_enabled ? "Automatic posting enabled for new live signals." : "Automatic posting disabled.";
+  } catch (error) {
+    toggle.checked = !desired;
+    toggle.disabled = false;
+    const status = $("#telegramSendStatus");
+    if (status) status.textContent = error.message;
+  }
+}
+
+function renderAbstentions(data) {
+  state.abstentions = data;
+  const gate = Number(data.gate?.window || 0);
+  const operational = Number(data.operational?.window || 0);
+  const decided = Number(data.decided_signals_window || 0);
+  $("#abstentionWindow").textContent = `${data.window_days || 7} DAYS`;
+  $("#abstentionGate").textContent = gate.toLocaleString();
+  $("#abstentionOperational").textContent = operational.toLocaleString();
+  $("#abstentionDecided").textContent = decided.toLocaleString();
+  $("#abstentionRatio").textContent = data.abstention_ratio == null ? "—" : `${(Number(data.abstention_ratio) * 100).toFixed(0)}%`;
+
+  const hours = data.by_hour || [];
+  const max = Math.max(1, ...hours.map((entry) => Number(entry.gate || 0) + Number(entry.operational || 0)));
+  const hourWrap = $("#abstentionHours");
+  if (hourWrap) {
+    hourWrap.replaceChildren();
+    hours.forEach((entry) => {
+      const value = Number(entry.gate || 0) + Number(entry.operational || 0);
+      const column = document.createElement("div");
+      column.className = "abstention-hour";
+      column.title = `${String(entry.hour).padStart(2, "0")}:00 UTC · ${entry.gate} gate · ${entry.operational} operational`;
+      const bar = document.createElement("i");
+      bar.style.height = `${value ? Math.max(6, Math.round((value / max) * 100)) : 2}%`;
+      if (!value) bar.classList.add("is-empty");
+      column.append(bar);
+      hourWrap.append(column);
+    });
+  }
+
+  const outcomes = new Map((data.outcomes_by_session || []).map((item) => [item.session, item]));
+  const sessionWrap = $("#abstentionSessions");
+  if (sessionWrap) {
+    sessionWrap.replaceChildren();
+    const sessions = data.by_session || [];
+    if (!sessions.length) {
+      const empty = document.createElement("small");
+      empty.textContent = "No abstentions in this window.";
+      sessionWrap.append(empty);
+    }
+    sessions.forEach((entry) => {
+      const row = document.createElement("div");
+      row.className = "abstention-row";
+      const name = document.createElement("strong");
+      name.textContent = entry.session;
+      const count = document.createElement("span");
+      count.textContent = `${entry.gate} gate · ${entry.operational} skipped`;
+      const result = document.createElement("em");
+      const record = outcomes.get(entry.session);
+      result.textContent = record && record.decisive
+        ? `${record.wins}W–${record.losses}L`
+        : "no resolved paper trades";
+      row.append(name, count, result);
+      sessionWrap.append(row);
+    });
+  }
+
+  const reasonWrap = $("#abstentionReasons");
+  if (reasonWrap) {
+    reasonWrap.replaceChildren();
+    const reasons = (data.by_code || []).slice(0, 6);
+    if (!reasons.length) {
+      const empty = document.createElement("small");
+      empty.textContent = "No reasons logged yet.";
+      reasonWrap.append(empty);
+    }
+    reasons.forEach((entry) => {
+      const row = document.createElement("div");
+      row.className = "abstention-row abstention-reason";
+      const name = document.createElement("strong");
+      name.textContent = entry.label;
+      const count = document.createElement("span");
+      count.textContent = `${entry.count} · ${(Number(entry.share) * 100).toFixed(0)}%`;
+      const bar = document.createElement("i");
+      bar.style.width = `${Math.max(2, Math.round(Number(entry.share) * 100))}%`;
+      row.append(name, count, bar);
+      reasonWrap.append(row);
+    });
+  }
+}
+
+async function loadAbstentions() {
+  try {
+    const data = await api("/api/abstentions?days=7&limit=10");
+    renderAbstentions(data);
+  } catch (error) {
+    const sessionWrap = $("#abstentionSessions");
+    if (sessionWrap) sessionWrap.textContent = error.message;
+  }
+}
+
+function renderFuturePlan(plan) {
+  state.future = plan;
+  const focus = plan.focus || {};
+  const data = plan.data || {};
+  const readiness = plan.readiness || {};
+  const evidence = plan.evidence;
+  $("#futurePair").textContent = `${focus.pair || data.pair || "—"} · M1`;
+  $("#futureWhy").textContent = focus.why || "No liquidity note is available for this pair.";
+  $("#futureAccuracyNote").textContent = focus.accuracy_note || "No pair is more likely to be accurate.";
+  $("#futureLiquidityRank").textContent = focus.liquidity_rank ? `#${focus.liquidity_rank}` : "—";
+  $("#futureDataSource").textContent = data.source || "—";
+  $("#futureCandleCount").textContent = Number(data.candles || 0).toLocaleString();
+  $("#futureReadyState").textContent = readiness.ready ? "ARMED" : "BLOCKED";
+
+  const blocked = $("#futureBlocked");
+  const reasons = $("#futureBlockedReasons");
+  if (blocked && reasons) {
+    reasons.replaceChildren();
+    (readiness.reasons || []).forEach((reason) => {
+      const item = document.createElement("li");
+      item.textContent = reason;
+      reasons.append(item);
+    });
+    blocked.hidden = Boolean(readiness.ready) || !(readiness.reasons || []).length;
+  }
+
+  const windows = plan.windows || [];
+  const windowGrid = $("#futureWindowGrid");
+  if (windowGrid) {
+    windowGrid.replaceChildren();
+    windows.forEach((window, index) => {
+      const card = document.createElement("div");
+      card.className = `future-window ${window.status === "ARMED" ? "is-armed" : "is-blocked"}`;
+      const number = document.createElement("span");
+      number.textContent = `WINDOW ${String(index + 1).padStart(2, "0")}`;
+      const time = document.createElement("strong");
+      time.textContent = new Date(window.entry_time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      const stateChip = document.createElement("b");
+      stateChip.className = "future-window-state";
+      stateChip.textContent = window.status;
+      const note = document.createElement("small");
+      note.textContent = window.status === "ARMED" ? "Direction reveals on candle close" : "Waiting for readiness";
+      card.append(number, time, stateChip, note);
+      windowGrid.append(card);
+    });
+  }
+  const windowCount = $("#futureWindowCount");
+  if (windowCount) windowCount.textContent = `${windows.length} WINDOWS`;
+
+  const replayRows = $("#futureReplayRows");
+  if (replayRows) {
+    replayRows.replaceChildren();
+    const replay = plan.replay || [];
+    if (!replay.length) {
+      const row = document.createElement("tr");
+      const cell = document.createElement("td");
+      cell.colSpan = 5;
+      cell.className = "empty-row";
+      cell.textContent = "Not enough completed candles to replay the gate.";
+      row.append(cell);
+      replayRows.append(row);
+    }
+    replay.slice().reverse().forEach((item) => {
+      const row = document.createElement("tr");
+      const entry = document.createElement("td");
+      entry.textContent = compactTime(item.entry_time);
+      const prediction = document.createElement("td");
+      prediction.textContent = compactTime(item.prediction_time);
+      const direction = document.createElement("td");
+      direction.textContent = item.direction || "—";
+      const probability = document.createElement("td");
+      probability.textContent = item.probability_up == null ? "—" : `${(Number(item.probability_up) * 100).toFixed(1)}%`;
+      const why = document.createElement("td");
+      why.className = "future-replay-why";
+      why.textContent = String(item.reason || "").slice(0, 150);
+      row.append(entry, prediction, direction, probability, why);
+      replayRows.append(row);
+    });
+  }
+  const replayCount = $("#futureReplayCount");
+  if (replayCount) replayCount.textContent = `${(plan.replay || []).length} ROWS`;
+
+  const hitRate = $("#futureHitRate");
+  if (hitRate) hitRate.textContent = evidence?.win_rate == null ? "—" : `${(evidence.win_rate * 100).toFixed(1)}%`;
+  const interval = $("#futureHitInterval");
+  if (interval) {
+    interval.textContent = evidence?.win_rate_ci95
+      ? `${(evidence.win_rate_ci95.lower * 100).toFixed(1)}–${(evidence.win_rate_ci95.upper * 100).toFixed(1)}%`
+      : "—";
+  }
+  const signals = $("#futureSignals");
+  if (signals) signals.textContent = evidence ? `${evidence.signals} / ${evidence.test_candles}` : "—";
+  const breakEven = $("#futureBreakEven");
+  if (breakEven) breakEven.textContent = evidence?.break_even_win_rate == null ? "—" : `${(evidence.break_even_win_rate * 100).toFixed(1)}%`;
+  const evidenceNote = $("#futureEvidenceNote");
+  if (evidenceNote) {
+    const intervalText = evidence?.win_rate_ci95
+      ? `${(evidence.win_rate_ci95.lower * 100).toFixed(1)}–${(evidence.win_rate_ci95.upper * 100).toFixed(1)}%`
+      : "wide";
+    evidenceNote.textContent = evidence
+      ? `Walk-forward re-run on the active ${data.source} dataset (${evidence.window_candles.toLocaleString()} candles, ${(evidence.assumed_payout * 100).toFixed(0)}% payout assumption). The observed hit rate has a ${intervalText} interval; that range is not proof of future accuracy.`
+      : "At least 120 candles are needed before any walk-forward evidence exists.";
+    if (data.source === "SYNTHETIC DEMO") evidenceNote.textContent += " Synthetic demo data is practice data, not market evidence.";
+  }
+
+  const alternatives = $("#futureAlternatives");
+  if (alternatives) {
+    alternatives.replaceChildren();
+    (plan.alternatives || []).forEach((item) => {
+      const row = document.createElement("div");
+      row.className = `future-alternative${item.active ? " is-active" : ""}`;
+      const name = document.createElement("strong");
+      name.textContent = item.pair;
+      const detail = document.createElement("span");
+      detail.textContent = `${item.liquidity} ${item.notes}`;
+      const status = document.createElement("em");
+      status.textContent = item.active ? "ACTIVE" : "NO LOCAL DATA";
+      row.append(name, detail, status);
+      alternatives.append(row);
+    });
+  }
+  const planStatus = $("#futurePlanStatus");
+  if (planStatus) planStatus.textContent = `Plan generated ${compactTime(plan.generated_at)} · ${plan.strategy_name}.`;
+}
+
+async function loadFuturePlan() {
+  if (state.futureBusy) return;
+  state.futureBusy = true;
+  const status = $("#futurePlanStatus");
+  if (status) status.textContent = "Generating the single-pair plan…";
+  try {
+    const [plan] = await Promise.all([api("/api/future/plan?count=6"), loadAbstentions()]);
+    renderFuturePlan(plan);
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  } finally {
+    state.futureBusy = false;
+  }
+}
+
+function percentProbability(value) {
+  return value == null ? "—" : `${(Number(value) * 100).toFixed(1)}% up`;
+}
+
+function describeDrift(drift) {
+  const state = String(drift?.state || "untracked").toUpperCase();
+  if (drift?.change == null) return state;
+  const change = Number(drift.change);
+  return `${state} · ${change > 0 ? "+" : ""}${(change * 100).toFixed(1)} pp`;
+}
+
+function renderModelCard(data) {
+  const prediction = data.prediction || {};
+  state.modelSource = data.source;
+  const canTrain = data.source === "IMPORTED CSV";
+  ["#retrainModel", "#rollbackModel"].forEach((selector) => {
+    const button = $(selector);
+    if (!button) return;
+    button.disabled = !canTrain;
+    button.title = canTrain ? "" : "Import completed candle history before training or rolling back a model.";
+  });
+  const activeVersion = data.active_version;
+  $("#modelVersionTag").textContent = activeVersion
+    ? `${activeVersion} RESTORE POINT`
+    : data.source === "IMPORTED CSV" ? "UNVERSIONED" : "DEMO / UNVERSIONED";
+  $("#modelVersionTag").title = activeVersion
+    ? "Latest validated snapshot used for rollback. Guarded online updates after this snapshot live in the champion file."
+    : "A validated snapshot is created when a challenger passes held-out validation.";
+  $("#modelFeatureVersion").textContent = `v${data.feature_version ?? "—"} · ${data.feature_count ?? "—"} inputs`;
+  $("#modelProbability").textContent = percentProbability(prediction.probability_up);
+  $("#modelRawProbability").textContent = percentProbability(prediction.raw_probability);
+  const calibrationReport = data.calibration_report || {};
+  const flatCalibration = Boolean(prediction.calibration_flat || calibrationReport.flat);
+  $("#modelCalibrationState").textContent = flatCalibration
+    ? "FLAT MAP · NO RANK SIGNAL"
+    : data.calibrated
+      ? `ISOTONIC · ${Number(data.calibration_samples || 0).toLocaleString()} PTS${calibrationReport.ece_after == null ? "" : ` · ECE ${(Number(calibrationReport.ece_after) * 100).toFixed(1)}%`}`
+      : calibrationReport.reason ? "RAW · FIT NOT ACCEPTED" : "RAW · NEEDS 60 OUTCOMES";
+  $("#modelCalibrationState").title = flatCalibration
+    ? "Every raw score maps to the same base rate. ECE looks low because the mapping is constant, not because the score ranks outcomes; the gate abstains while this holds."
+    : calibrationReport.validated_on
+      ? `Held-out validation on ${calibrationReport.validated_on} newer outcomes. ECE ${(Number(calibrationReport.ece_before) * 100).toFixed(1)}% → ${(Number(calibrationReport.ece_after) * 100).toFixed(1)}%.`
+      : calibrationReport.reason || "Calibration is fitted from resolved outcomes once at least 60 exist.";
+  $("#modelUncertainty").textContent = prediction.uncertainty == null
+    ? "NO ENSEMBLE"
+    : `±${(Number(prediction.uncertainty) * 100).toFixed(1)} pp · ${Number(data.ensemble_members || 0)} MEMBERS`;
+  $("#modelDriftState").textContent = describeDrift(data.drift);
+
+  const contributions = $("#modelContributions");
+  contributions.replaceChildren();
+  if (!prediction.contributions?.length) {
+    const empty = document.createElement("p");
+    empty.className = "dataset-empty";
+    empty.textContent = data.model_ready ? "No feature contributions were returned." : (data.reason || "Train a model to see its drivers.");
+    contributions.append(empty);
+  } else {
+    const peak = Math.max(...prediction.contributions.map((item) => Math.abs(Number(item.contribution) || 0)), 1e-6);
+    prediction.contributions.forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "contribution-row";
+      const name = document.createElement("span");
+      name.className = "contribution-name";
+      name.textContent = item.label || item.feature;
+      const bar = document.createElement("i");
+      bar.className = "contribution-bar";
+      bar.dataset.direction = Number(item.contribution) >= 0 ? "up" : "down";
+      bar.style.width = `${Math.max(4, (Math.abs(Number(item.contribution)) / peak) * 100).toFixed(1)}%`;
+      const value = document.createElement("strong");
+      value.textContent = `${Number(item.contribution) > 0 ? "+" : ""}${Number(item.contribution).toFixed(3)}`;
+      row.append(name, bar, value);
+      contributions.append(row);
+    });
+  }
+
+  const versions = $("#modelVersions");
+  versions.replaceChildren();
+  if (!data.versions?.length) {
+    const empty = document.createElement("p");
+    empty.className = "dataset-empty";
+    empty.textContent = data.source === "IMPORTED CSV"
+      ? "No validated snapshot yet. Retraining promotes one only if it wins on held-out candles."
+      : "Demo data is never versioned or learned from.";
+    versions.append(empty);
+  } else {
+    data.versions.forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "model-version-row";
+      if (item.active) row.dataset.active = "true";
+      const label = document.createElement("strong");
+      label.textContent = `${item.version}${item.active ? " · RESTORE POINT" : ""}`;
+      const detail = document.createElement("span");
+      const brier = item.metrics?.challenger?.brier;
+      detail.textContent = `${item.reason} · ${Number(item.training_samples || 0).toLocaleString()} samples${brier == null ? "" : ` · Brier ${Number(brier).toFixed(4)}`}`;
+      row.append(label, detail);
+      versions.append(row);
+    });
+  }
+
+  const strategies = $("#modelStrategies");
+  strategies.replaceChildren();
+  if (!data.by_strategy?.length) {
+    const empty = document.createElement("p");
+    empty.className = "dataset-empty";
+    empty.textContent = "No resolved imported outcomes yet.";
+    strategies.append(empty);
+  } else {
+    data.by_strategy.forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "model-strategy-row";
+      const label = document.createElement("strong");
+      label.textContent = item.strategy;
+      const detail = document.createElement("span");
+      detail.textContent = item.evaluated
+        ? `${item.correct}/${item.evaluated} correct before update${item.wins == null ? "" : ` · ${item.wins}W/${item.losses}L/${item.ties}T`}`
+        : `${Number(item.resolved || 0)} resolved · no scored prediction`;
+      row.append(label, detail);
+      strategies.append(row);
+    });
+  }
+
+  const reliability = $("#modelReliability");
+  reliability.replaceChildren();
+  if (!data.reliability?.length) {
+    const empty = document.createElement("p");
+    empty.className = "dataset-empty";
+    empty.textContent = "Resolve imported outcomes to see a reliability curve.";
+    reliability.append(empty);
+  } else {
+    const header = document.createElement("div");
+    header.className = "reliability-row reliability-head";
+    ["BUCKET", "ISSUED", "OBSERVED", "N"].forEach((text) => {
+      const cell = document.createElement("span");
+      cell.textContent = text;
+      header.append(cell);
+    });
+    reliability.append(header);
+    data.reliability.forEach((bin) => {
+      const row = document.createElement("div");
+      row.className = "reliability-row";
+      const bucket = document.createElement("span");
+      bucket.textContent = `${(Number(bin.lower) * 100).toFixed(0)}–${(Number(bin.upper) * 100).toFixed(0)}%`;
+      const issued = document.createElement("span");
+      issued.textContent = `${(Number(bin.mean_predicted) * 100).toFixed(1)}%`;
+      const observed = document.createElement("strong");
+      observed.textContent = `${(Number(bin.observed) * 100).toFixed(1)}%`;
+      const count = document.createElement("span");
+      count.textContent = Number(bin.count).toLocaleString();
+      row.append(bucket, issued, observed, count);
+      reliability.append(row);
+    });
+    const note = document.createElement("p");
+    note.className = "micro-copy";
+    note.textContent = `${Number(data.reliability_samples || 0).toLocaleString()} recent outcomes scored by the current champion. Descriptive only; small buckets are noisy.`;
+    reliability.append(note);
+  }
+
+  const learningLog = $("#modelLearningLog");
+  learningLog.replaceChildren();
+  const events = [...(data.learning_events || [])].reverse().slice(0, 6);
+  if (!events.length) {
+    const empty = document.createElement("p");
+    empty.className = "dataset-empty";
+    empty.textContent = "No guarded rejections or calibration changes this session.";
+    learningLog.append(empty);
+  } else {
+    const labels = {
+      update_rejected: "UPDATE REJECTED",
+      calibration: "CALIBRATION",
+      promotion: "PROMOTION",
+      rollback: "ROLLBACK",
+    };
+    events.forEach((event) => {
+      const row = document.createElement("div");
+      row.className = "learning-event";
+      row.dataset.kind = event.kind;
+      const meta = document.createElement("span");
+      const at = event.at ? new Date(event.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+      meta.textContent = `${labels[event.kind] || String(event.kind || "EVENT").toUpperCase()}${at ? ` · ${at}` : ""}`;
+      const detail = document.createElement("strong");
+      detail.textContent = event.detail || "";
+      row.append(meta, detail);
+      learningLog.append(row);
+    });
+  }
+  const counts = data.learning_counts;
+  $("#modelLearningCounts").textContent = counts
+    ? `This session: accepted updates ${Number(counts.accepted_updates || 0).toLocaleString()} · rejected ${Number(counts.rejected_updates || 0).toLocaleString()} · recalibrations ${Number(counts.recalibrations || 0).toLocaleString()} · promotions ${Number(counts.promotions || 0).toLocaleString()} · rollbacks ${Number(counts.rollbacks || 0).toLocaleString()}.`
+    : "";
+  const shadow = data.shadow || {};
+  const shadowTracker = shadow.tracker || {};
+  $("#modelShadow").textContent = shadow.total
+    ? `Shadow learning: ${Number(shadow.resolved || 0).toLocaleString()} resolved, ${Number(shadow.learned || 0).toLocaleString()} updates kept${shadowTracker.accuracy == null ? "" : `, ${(Number(shadowTracker.accuracy) * 100).toFixed(1)}% direction accuracy`}${shadowTracker.brier == null ? "" : `, Brier ${Number(shadowTracker.brier).toFixed(3)}`}. Counterfactual only — never traded or delivered.`
+    : "";
+  const dataset = data.dataset || {};
+  const datasetTracker = dataset.tracker || {};
+  $("#modelDataset").textContent = dataset.resolved
+    ? `Dataset learning: ${Number(dataset.learned || 0).toLocaleString()} of ${Number(dataset.resolved || 0).toLocaleString()} completed-bar outcomes kept${dataset.accuracy == null ? "" : `, ${(Number(dataset.accuracy) * 100).toFixed(1)}% next-bar accuracy`}${datasetTracker.brier == null ? "" : `, Brier ${Number(datasetTracker.brier).toFixed(3)}`}${dataset.last_cursor ? ` · cursor ${compactTime(dataset.last_cursor)}` : ""}. Prequential and not paper trades.`
+    : dataset.enabled
+      ? "Dataset learning is on; no completed bar has been labelled yet."
+      : "Dataset learning is disabled (ORBIX_DATASET_LEARNING).";
+
+  const prequential = data.prequential;
+  const recordText = prequential?.samples
+    ? ` Prequential record: ${Number(prequential.correct).toLocaleString()}/${Number(prequential.samples).toLocaleString()} correct (${(Number(prequential.accuracy) * 100).toFixed(1)}%, 95% Wilson ${(Number(prequential.accuracy_ci95.lower) * 100).toFixed(1)}–${(Number(prequential.accuracy_ci95.upper) * 100).toFixed(1)}%); Brier ${Number(prequential.brier).toFixed(3)}; majority-class baseline ${(Number(prequential.majority_baseline_accuracy) * 100).toFixed(1)}%.`
+    : " No resolved imported predictions yet, so there is no accuracy record to show.";
+  $("#modelLabNote").textContent = (data.note || "Probabilities describe recorded evidence, not future certainty.") + recordText;
+}
+
+async function loadPreflight() {
+  const panel = $("#preflightPanel");
+  const status = $("#modelActionStatus");
+  if (status) status.textContent = "Checking provider, calendar, model and delivery…";
+  try {
+    const data = await api("/api/preflight");
+    panel.hidden = false;
+    const summary = $("#preflightSummary");
+    summary.dataset.ready = data.ready ? "true" : "false";
+    summary.textContent = data.ready ? "SIGNAL PIPELINE READY" : "SIGNAL PIPELINE BLOCKED";
+    const list = $("#preflightChecks");
+    list.replaceChildren();
+    data.checks.forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "preflight-check";
+      row.dataset.status = item.status;
+      const dot = document.createElement("i");
+      dot.className = "preflight-dot";
+      const label = document.createElement("strong");
+      label.textContent = item.label;
+      const detail = document.createElement("span");
+      detail.textContent = item.detail;
+      const badge = document.createElement("span");
+      badge.className = "preflight-badge";
+      badge.textContent = item.status === "ready" ? "READY" : item.status === "warning" ? "WARNING" : "BLOCKED";
+      row.append(dot, label, detail, badge);
+      list.append(row);
+    });
+    const warmup = data.warmup || {};
+    const execution = data.execution_ready
+      ? "Order execution is available."
+      : "Order execution: manual only — Orbix sends no broker orders.";
+    const auth = data.dashboard_auth_enabled
+      ? "Dashboard authentication is on."
+      : "Dashboard authentication is off — set ORBIX_DASHBOARD_PASSWORD before exposing this URL.";
+    $("#preflightNote").textContent = `${execution} ${auth} ${data.note} Warm-up: ${Number(warmup.resolved_outcomes || 0).toLocaleString()} resolved outcomes; calibration starts after ${Number(warmup.calibration_starts_after || 60).toLocaleString()}.`;
+    if (status) status.textContent = data.ready
+      ? "Signal preflight passed; execution remains manual."
+      : "Preflight found blockers; see the checklist.";
+  } catch (error) {
+    if (status) status.textContent = `Preflight unavailable: ${error.message}`;
+  }
+}
+
+async function loadModelCard() {
+  const status = $("#modelActionStatus");
+  try {
+    const pair = $("#pairSelect")?.value || state.market?.pair || "EUR/USD";
+    const data = await api(`/api/model?pair=${encodeURIComponent(pair)}`);
+    renderModelCard(data);
+    if (status && !status.dataset.busy) status.textContent = "";
+  } catch (error) {
+    if (status) status.textContent = `Model status unavailable: ${error.message}`;
+  }
+}
+
+async function runModelAction(path, confirmation, busyLabel) {
+  const status = $("#modelActionStatus");
+  const buttons = ["#retrainModel", "#rollbackModel", "#refreshModel"].map((selector) => $(selector));
+  if (confirmation && !window.confirm(confirmation)) return;
+  buttons.forEach((button) => { if (button) button.disabled = true; });
+  if (status) {
+    status.dataset.busy = "true";
+    status.textContent = busyLabel;
+  }
+  try {
+    const result = await api(path, { method: "POST" });
+    if (status) status.textContent = `${result.status || "done"} — ${result.reason || result.note || ""}`;
+    await loadModelCard();
+    if (status) status.textContent = `${result.status || "done"} — ${result.reason || result.note || ""}`;
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  } finally {
+    if (status) delete status.dataset.busy;
+    buttons.forEach((button) => { if (button) button.disabled = false; });
+    if (state.modelSource !== "IMPORTED CSV") {
+      ["#retrainModel", "#rollbackModel"].forEach((selector) => {
+        const button = $(selector);
+        if (button) button.disabled = true;
+      });
+    }
+  }
+}
+
+function wireEvents() {
+  $("#generateButton").addEventListener("click", generateSignal);
+  $("#copyTicket").addEventListener("click", copyBrokerTicket);
+  $("#refreshModel").addEventListener("click", loadModelCard);
+  $("#preflightModel").addEventListener("click", loadPreflight);
+  $("#retrainModel").addEventListener("click", () => runModelAction(
+    `/api/model/retrain?pair=${encodeURIComponent($("#pairSelect").value || "EUR/USD")}`,
+    "Retrain a challenger and replace the champion only if it wins on held-out candles?",
+    "Fitting challenger and validating…",
+  ));
+  $("#rollbackModel").addEventListener("click", () => runModelAction(
+    `/api/model/rollback?pair=${encodeURIComponent($("#pairSelect").value || "EUR/USD")}`,
+    "Restore the previous validated model snapshot?",
+    "Restoring the previous snapshot…",
+  ));
+  $("#futureRefresh").addEventListener("click", loadFuturePlan);
+  $("#telegramSendLatest").addEventListener("click", () => sendTelegramSignals("latest"));
+  $("#telegramSendBatch").addEventListener("click", () => sendTelegramSignals("batch"));
+  $("#telegramTest").addEventListener("click", () => sendTelegramSignals("test"));
+  $("#telegramPreview").addEventListener("click", previewTelegramMessage);
+  $("#telegramAutoPost").addEventListener("change", toggleTelegramAutoPost);
+  $("#telegramRefresh").addEventListener("click", () => refreshTelegramPage({ announce: true }));
+  $("#enableNotifications").addEventListener("click", toggleBrowserNotifications);
+  $("#syncLiveFeedButton").addEventListener("click", syncLiveFeed);
+  $("#refreshCalendarButton").addEventListener("click", refreshCalendarNow);
+  $("#backtestButton").addEventListener("click", () => runBacktest(true));
+  $("#pairSelect").addEventListener("change", async () => {
+    await loadMarket();
+    void loadModelCard();
+    scheduleAutomaticBacktest();
+  });
+  $("#strategySelect").addEventListener("change", () => scheduleAutomaticBacktest());
+  $("#payoutInput").addEventListener("change", () => scheduleAutomaticBacktest());
+  $("#csvFile").addEventListener("change", importCsv);
+  $("#resetDemoButton").addEventListener("click", resetDemo);
+  $("#refreshHistory").addEventListener("click", refreshHistory);
+  $("#refreshStorage").addEventListener("click", refreshStorageSummary);
+  $("#datasetHistory").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-activate-dataset]");
+    if (button && !button.disabled) activateArchivedDataset(button.dataset.activateDataset, button);
+  });
+  $("#saveProviderButton").addEventListener("click", saveProviderConfiguration);
+  $("#testProviderButton").addEventListener("click", () => testProviderConfiguration());
+  $("#clearProviderButton").addEventListener("click", clearProviderConfiguration);
+  $("#creditDashboardTrigger").addEventListener("click", () => {
+    setCreditPopupOpen($("#creditDashboardPopup").hidden);
+  });
+  $("#creditPopupClose").addEventListener("click", () => {
+    setCreditPopupOpen(false);
+    $("#creditDashboardTrigger").focus();
+  });
+  document.addEventListener("click", (event) => {
+    if (!$("#creditDashboard").contains(event.target)) setCreditPopupOpen(false);
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !$("#creditDashboardPopup").hidden) {
+      setCreditPopupOpen(false);
+      $("#creditDashboardTrigger").focus();
+    }
+  });
+  $("#historyRows").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-resolve-id]");
+    if (button) resolvePaperSignal(button.dataset.resolveId, button);
+  });
+  $("#dismissNotice").addEventListener("click", () => { $("#feedNotice").hidden = true; });
+  $("#traderRefresh").addEventListener("click", () => { void loadTraderPage(); });
+  $("#toggleCatalog").addEventListener("click", () => {
+    const list = $("#catalogList");
+    const isOpen = !list.hidden;
+    list.hidden = isOpen;
+    $("#toggleCatalog").setAttribute("aria-expanded", String(!isOpen));
+    $("#toggleCatalog").innerHTML = isOpen ? "SHOW ALL 30 <span>＋</span>" : "HIDE LIST <span>−</span>";
+  });
+  document.querySelectorAll(".top-nav [data-route]").forEach((link) => link.addEventListener("click", () => { /* native hash navigation supports back/forward */ }));
+  window.addEventListener("hashchange", handleRouteChange);
+  window.addEventListener("resize", () => {
+    if (state.market && state.route === "dashboard") drawChart(state.market.candles);
+    startBlackholeAnimation();
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) stopBlackholeAnimation();
+    else startBlackholeAnimation();
+  });
+  if (typeof prefersReducedMotion.addEventListener === "function") {
+    prefersReducedMotion.addEventListener("change", startBlackholeAnimation);
+  } else if (typeof prefersReducedMotion.addListener === "function") {
+    prefersReducedMotion.addListener(startBlackholeAnimation);
+  }
+}
+
+async function start() {
+  wireEvents();
+  await initAuth();
+  updateNotificationButton();
+  initializeBlackholeAnimation();
+  let route = window.location.hash.slice(1);
+  if (!Object.hasOwn(ROUTES, route)) {
+    route = "dashboard";
+    window.history.replaceState(null, "", "#dashboard");
+  }
+  setActivePage(route, false);
+  await Promise.all([loadStrategies(), loadMarket(), refreshHistory(), refreshStorageSummary(), refreshAutomationStatus(), loadProviders()]);
+  scheduleAutomaticBacktest();
+  window.setInterval(() => { void refreshAutomationStatus(); }, 10000);
+  window.setInterval(renderClock, 1000);
+  window.setInterval(() => { if (state.route === "trader") void loadTraderPage(); }, 30000);
+  window.setInterval(() => { if (state.route === "connections") void loadProviders(); }, 30000);
+  if (state.route === "dashboard") startBlackholeAnimation();
+}
+
+document.addEventListener("DOMContentLoaded", start);
