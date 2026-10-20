@@ -822,6 +822,17 @@ class Runtime:
             if learning_model is not None and self.source == "IMPORTED CSV":
                 learning_model.save(self.model_path(pair))
             active_dataset = self.dataset_id()
+            if signal.side != "NO SIGNAL" and self.ledger.has_signal_for_time(
+                pair,
+                strategy_id,
+                active_dataset,
+                signal.entry_time or signal.generated_at,
+            ):
+                # Every caller shares this guard: a manual API call, the scan,
+                # and the automatic loop must not double-count one candle.
+                raise ValueError(
+                    "A paper signal for this strategy and candle entry is already recorded."
+                )
             shadow_note = None
             if signal.side == "NO SIGNAL":
                 # Abstentions are logged so restraint can be measured, but they

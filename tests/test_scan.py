@@ -99,6 +99,22 @@ class StrategyScanTests(unittest.TestCase):
             )
             runtime.candle_store.close()
 
+    def test_the_same_candle_cannot_record_the_same_strategy_twice(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            history = root / "history.csv"
+            write_history(history, 320, datetime(2025, 5, 1, 8, 0, tzinfo=UTC))
+            runtime = Runtime(data_dir=root / "data")
+            runtime.import_csv_file(history, "EUR/USD")
+            scan = runtime.scan_strategies("EUR/USD", 1)
+            best = scan["best"]
+            self.assertIsNotNone(best)
+            runtime.generate_signal("EUR/USD", best["strategy"], 1)
+            with self.assertRaises(ValueError):
+                runtime.generate_signal("EUR/USD", best["strategy"], 1)
+            self.assertEqual(len(runtime.ledger.list_recent(limit=10)), 1)
+            runtime.candle_store.close()
+
     def test_clock_is_live_on_demo_and_replays_an_imported_file(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
