@@ -1,0 +1,24 @@
+// Top-level build file for Orbix APK - Full Python inside APK
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+        maven { url "https://chaquo.com/maven" }
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.2.2'
+        classpath 'com.chaquo.python:gradle:15.0.1'
+    }
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+        maven { url "https://chaquo.com/maven" }
+    }
+}
+
+task clean(type: Delete) {
+    delete rootProject.buildDir
+}

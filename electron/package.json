@@ -1,0 +1,49 @@
+{
+  "name": "orbix-laptop",
+  "version": "0.4.0",
+  "description": "Orbix Signal Lab - Laptop desktop app with offline database, all Orbix inside",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "build": "electron-builder --linux --win --mac",
+    "build:linux": "electron-builder --linux",
+    "build:win": "electron-builder --win",
+    "build:mac": "electron-builder --mac",
+    "dist": "npm run build"
+  },
+  "author": "Orbix Lab",
+  "license": "MIT",
+  "dependencies": {
+    "electron-store": "^8.1.0"
+  },
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.0"
+  },
+  "build": {
+    "appId": "com.orbix.signallab.laptop",
+    "productName": "Orbix Signal Lab",
+    "files": [
+      "main.js",
+      "preload.js",
+      "../web/**/*",
+      "../orbix/**/*",
+      "../mobile/dist/**/*",
+      "../data/**/*"
+    ],
+    "directories": {
+      "buildResources": "build"
+    },
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "category": "Finance"
+    },
+    "win": {
+      "target": ["nsis"]
+    },
+    "mac": {
+      "target": ["dmg"]
+    }
+  }
+}

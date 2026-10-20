@@ -109,6 +109,41 @@ PORT=10000 ORBIX_DATA_DIR=/var/lib/orbix bash startup.sh
 
 Point the platform's health check at `/healthz` and keep the data directory on a real disk.
 
+### Mobile & Laptop — All Orbix inside APK
+
+**New in 0.4.0-mobile: Full offline APK with database, works 24/7 on your device**
+
+Orbix now ships as:
+- **Mobile APK** (`mobile/`): Capacitor + Chaquopy Python, SQLite inside APK, 5 strategies JS port, offline-first, WorkManager 15min + BootReceiver for 24/7
+- **Laptop App** (`electron/`): Electron + Python backend, tray, same SQLite, keyboard shortcuts Ctrl+1..5
+- **PWA**: `web/manifest.json` + `service-worker.js` - installable, offline cache, bottom nav on mobile
+
+All Orbix data lives inside app: `datasets`, `candles` (M1), `signals`, `settings`, `learning` - SQLite (native) or IndexedDB (web fallback). No server needed.
+
+```bash
+# Build mobile & laptop interfaces
+./scripts/build_mobile.sh
+
+# Build APK (needs Android Studio + Java 17)
+./scripts/build_apk.sh
+# APK: mobile/android/app/build/outputs/apk/debug/app-debug.apk
+# Contains: all web UI + all Python (via Chaquopy) + SQLite DB + 24/7 worker
+
+# Laptop
+cd electron && npm install && npm start        # dev
+npm run build                                   # AppImage, deb, dmg, exe
+
+# PWA local (no Android SDK needed)
+npx serve mobile/dist
+# -> http://localhost:3000 - offline with IndexedDB
+```
+
+Mobile UI: bottom nav (Dash, Engine, Paper, Data, Trader), swipe gestures, 44px touch targets, offline badge, local notifications. Laptop UI: top nav, hover states, multi-column, tray.
+
+Database inside APK: `/data/data/com.orbix.signallab/files/orbix_data/` (APK), `~/Library/Application Support/Orbix/` (laptop), `./mobile_data/` (web). Works offline, syncs to Supabase when online (optional, free tier 500MB).
+
+See `docs/MOBILE.md` and `mobile/README.md` for full build guide.
+
 ## Run it without live credentials
 
 ```bash
