@@ -67,6 +67,7 @@ class PredictionEngine:
                 probability_calibrated=calibrated if decision_probability is not None else None,
                 uncertainty=prediction.uncertainty if uses_model and prediction else None,
                 max_uncertainty=max_uncertainty,
+                calibration_flat=prediction.calibration_flat if uses_model and prediction else False,
             )
 
         # Candle timestamps are opens. Once the latest candle is complete, the

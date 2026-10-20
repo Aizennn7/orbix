@@ -15,6 +15,7 @@ from orbix.learning import DriftMonitor, ModelRegistry, PrequentialTracker, Self
 from orbix.market_data import build_demo_candles
 from orbix.model import OnlineLogisticModel, build_training_samples
 from orbix.prediction import build_prediction
+from orbix.strategies import decide
 from orbix.runtime import Runtime
 
 
@@ -87,6 +88,45 @@ class CalibrationTests(unittest.TestCase):
         self.assertEqual(restored.thresholds, calibrator.thresholds)
         self.assertEqual(restored.values, calibrator.values)
         self.assertAlmostEqual(restored.transform(0.5), calibrator.transform(0.5))
+
+
+    def test_a_collapsed_mapping_is_flagged_instead_of_looking_calibrated(self) -> None:
+        # Observed rates fall as the raw score rises, so PAVA merges every bin
+        # into the base rate. ECE would look excellent, but ranking is gone.
+        points: list[tuple[float, int]] = []
+        for level in range(6):
+            probability = 0.10 + level * 0.15
+            wins = 18 - level * 3
+            points.extend([(probability, 1)] * wins)
+            points.extend([(probability, 0)] * (20 - wins))
+        calibrator, report = fit_validated(points)
+        self.assertTrue(calibrator.fitted)
+        self.assertTrue(calibrator.flat)
+        self.assertEqual(calibrator.levels, 1)
+        self.assertTrue(report["flat"])
+        self.assertEqual(report["levels"], 1)
+        self.assertIn("collapsed to one level", report["reason"])
+
+    def test_flat_calibration_is_a_stable_abstention(self) -> None:
+        candles, rows, _ = demo_samples(360)
+        model = OnlineLogisticModel().fit(build_training_samples(candles, rows))
+        model.calibrator = IsotonicCalibrator(thresholds=[0.5], values=[0.55], samples=120)
+        prediction = build_prediction(model, rows[-1])
+        self.assertTrue(prediction.calibration_flat)
+        self.assertTrue(prediction.calibrated)
+        self.assertEqual(prediction.probability_up, 0.55)
+
+        decision = decide(
+            "ml_consensus",
+            candles[-1],
+            candles[-2].close,
+            rows[-1],
+            0.55,
+            calibration_flat=True,
+        )
+        self.assertEqual(decision.side, "NO SIGNAL")
+        self.assertIn("calibration is flat", decision.reason)
+        self.assertEqual(classify_reason(decision.reason), "flat_calibration")
 
 
 class ModelTests(unittest.TestCase):

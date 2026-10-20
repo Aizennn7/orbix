@@ -35,6 +35,23 @@ class IsotonicCalibrator:
     def fitted(self) -> bool:
         return bool(self.thresholds) and bool(self.values) and self.samples > 0
 
+    @property
+    def levels(self) -> int:
+        """Number of distinct calibrated levels the mapping can output."""
+        return len(self.values) if self.fitted else 0
+
+    @property
+    def flat(self) -> bool:
+        """A one-level map is a base rate, not a ranking of scores.
+
+        Pool-adjacent-violators can legitimately merge every bin when the raw
+        score has no monotone relationship with outcomes. Such a map can look
+        well calibrated (all rows get the base rate) while destroying the score
+        order that threshold rules depend on, so it is labelled instead of
+        being presented as a normal fit.
+        """
+        return self.fitted and self.levels < 2
+
     @classmethod
     def fit(
         cls,
@@ -148,8 +165,15 @@ def fit_validated(
             "ece_after": expected_calibration_error(calibrated),
             "brier_before": brier_score(rows),
             "brier_after": brier_score(calibrated),
-            "bins": len(calibrator.thresholds),
-            "reason": f"Fewer than {minimum_for_holdout} outcomes, so the fit was not split for validation.",
+            "bins": calibrator.levels,
+            "levels": calibrator.levels,
+            "flat": calibrator.flat,
+            "reason": (
+                "The mapping collapsed to one level: the raw score has no usable rank signal, so a constant "
+                "probability would look calibrated while erasing the ordering. The gate abstains while this holds."
+                if calibrator.flat
+                else f"Fewer than {minimum_for_holdout} outcomes, so the fit was not split for validation."
+            ),
         }
 
     split = max(60, int(len(rows) * train_fraction))
@@ -178,11 +202,18 @@ def fit_validated(
         "ece_after": calibrated_ece,
         "brier_before": raw_brier,
         "brier_after": calibrated_brier,
-        "bins": len(calibrator.thresholds),
+        "bins": calibrator.levels,
+        "levels": calibrator.levels,
+        "flat": calibrator.flat,
         "reason": (
-            "Held-out calibration improved both Brier score and ECE."
-            if accepted
-            else "Held-out calibration did not improve both Brier score and ECE; the previous mapping was kept."
+            "The mapping collapsed to one level: the raw score has no usable rank signal. The gate abstains "
+            "while this holds instead of trading on a constant probability."
+            if calibrator.flat
+            else (
+                "Held-out calibration improved both Brier score and ECE."
+                if accepted
+                else "Held-out calibration did not improve both Brier score and ECE; the previous mapping was kept."
+            )
         ),
     }
 

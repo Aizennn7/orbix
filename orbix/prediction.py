@@ -19,6 +19,7 @@ class Prediction:
     uncertainty: float | None
     ensemble_members: int
     calibrated: bool
+    calibration_flat: bool = False
     contributions: list[dict] = field(default_factory=list)
     abstain_reason: str | None = None
 
@@ -29,6 +30,7 @@ class Prediction:
             "uncertainty": self.uncertainty,
             "ensemble_members": self.ensemble_members,
             "calibrated": self.calibrated,
+            "calibration_flat": self.calibration_flat,
             "contributions": self.contributions,
             "abstain_reason": self.abstain_reason,
         }
@@ -53,6 +55,7 @@ def build_prediction(
         uncertainty = spread
         members = len(ensemble.members)
     probability = champion.calibrator.transform(raw) if champion.calibrator.fitted else raw
+    flat = champion.calibrator.flat
     reason = None
     if uncertainty is not None and uncertainty > max_uncertainty:
         reason = (
@@ -65,6 +68,7 @@ def build_prediction(
         uncertainty=None if uncertainty is None else float(uncertainty),
         ensemble_members=members,
         calibrated=champion.calibrator.fitted,
+        calibration_flat=flat,
         contributions=champion.contributions(features),
         abstain_reason=reason,
     )

@@ -471,14 +471,20 @@ async function runBacktest(force = true) {
       ? "No decisive signals in the test window."
       : `${report.wins}/${report.decisive_trades} decisive wins; 95% Wilson interval ${ci}.`;
     const calibration = report.calibration || {};
-    const calibrationText = calibration.fitted
-      ? ` Probability source: ${report.probability}. On the same ${Number(calibration.calibration_points_available || 0).toLocaleString()} later predictions: ECE ${(Number(calibration.raw_ece) * 100).toFixed(1)}% raw → ${(Number(calibration.calibrated_ece) * 100).toFixed(1)}% calibrated; Brier ${Number(calibration.raw_brier).toFixed(4)} → ${Number(calibration.calibrated_brier).toFixed(4)}. Lower is better for both; calibration improves reliability, not necessarily sharpness. Last fit validated on ${Number(calibration.last_validation?.validated_on || 0).toLocaleString()} already-matured outcomes.`
-      : " Not enough matured outcomes in this window to fit a calibrator; probabilities stayed raw.";
+    const calibrationText = calibration.flat
+      ? ` Calibration collapsed to a single level on ${Number(calibration.fitted_on_outcomes || 0).toLocaleString()} resolved outcomes. The low ECE is an artifact of giving every score the same base rate, not evidence of a ranking edge; the flat-calibration gate removes model signals while this holds.`
+      : calibration.fitted
+        ? ` Probability source: ${report.probability}. On the same ${Number(calibration.calibration_points_available || 0).toLocaleString()} later predictions: ECE ${(Number(calibration.raw_ece) * 100).toFixed(1)}% raw → ${(Number(calibration.calibrated_ece) * 100).toFixed(1)}% calibrated; Brier ${Number(calibration.raw_brier).toFixed(4)} → ${Number(calibration.calibrated_brier).toFixed(4)}. Lower is better for both; calibration improves reliability, not necessarily sharpness. Last fit validated on ${Number(calibration.last_validation?.validated_on || 0).toLocaleString()} already-matured outcomes.`
+        : " Not enough matured outcomes in this window to fit a calibrator; probabilities stayed raw.";
     const gate = report.uncertainty_gate || {};
     const gateText = gate.enabled && gate.evaluated
       ? ` Uncertainty gate: ${Number(gate.blocked_signals || 0).toLocaleString()} would-be signals removed out of ${Number(gate.evaluated).toLocaleString()} model bars (limit ${(Number(gate.limit) * 100).toFixed(1)} pp).`
       : "";
-    $("#backtestNote").textContent = `${report.data_source || "Current data"} · ${report.test_candles} later candles tested · ${rateText} ${targetStatus} Coverage ${(report.signal_coverage * 100).toFixed(1)}%; net ${report.net_units.toFixed(2)} units; max drawdown ${report.max_drawdown_units.toFixed(2)} units.${calibrationText}${gateText} ${report.note}`;
+    const flatGate = report.calibration_gate || {};
+    const flatGateText = flatGate.flat
+      ? ` Flat-calibration gate: ${Number(flatGate.blocked_signals || 0).toLocaleString()} would-be signals removed out of ${Number(flatGate.abstentions || 0).toLocaleString()} gated bars.`
+      : "";
+    $("#backtestNote").textContent = `${report.data_source || "Current data"} · ${report.test_candles} later candles tested · ${rateText} ${targetStatus} Coverage ${(report.signal_coverage * 100).toFixed(1)}%; net ${report.net_units.toFixed(2)} units; max drawdown ${report.max_drawdown_units.toFixed(2)} units.${calibrationText}${gateText}${flatGateText} ${report.note}`;
     state.lastBacktestKey = key;
   } catch (error) {
     $("#backtestNote").textContent = error.message;
@@ -1476,12 +1482,17 @@ function renderModelCard(data) {
   $("#modelProbability").textContent = percentProbability(prediction.probability_up);
   $("#modelRawProbability").textContent = percentProbability(prediction.raw_probability);
   const calibrationReport = data.calibration_report || {};
-  $("#modelCalibrationState").textContent = data.calibrated
-    ? `ISOTONIC · ${Number(data.calibration_samples || 0).toLocaleString()} PTS${calibrationReport.ece_after == null ? "" : ` · ECE ${(Number(calibrationReport.ece_after) * 100).toFixed(1)}%`}`
-    : calibrationReport.reason ? "RAW · FIT NOT ACCEPTED" : "RAW · NEEDS 60 OUTCOMES";
-  $("#modelCalibrationState").title = calibrationReport.validated_on
-    ? `Held-out validation on ${calibrationReport.validated_on} newer outcomes. ECE ${(Number(calibrationReport.ece_before) * 100).toFixed(1)}% → ${(Number(calibrationReport.ece_after) * 100).toFixed(1)}%.`
-    : calibrationReport.reason || "Calibration is fitted from resolved outcomes once at least 60 exist.";
+  const flatCalibration = Boolean(prediction.calibration_flat || calibrationReport.flat);
+  $("#modelCalibrationState").textContent = flatCalibration
+    ? "FLAT MAP · NO RANK SIGNAL"
+    : data.calibrated
+      ? `ISOTONIC · ${Number(data.calibration_samples || 0).toLocaleString()} PTS${calibrationReport.ece_after == null ? "" : ` · ECE ${(Number(calibrationReport.ece_after) * 100).toFixed(1)}%`}`
+      : calibrationReport.reason ? "RAW · FIT NOT ACCEPTED" : "RAW · NEEDS 60 OUTCOMES";
+  $("#modelCalibrationState").title = flatCalibration
+    ? "Every raw score maps to the same base rate. ECE looks low because the mapping is constant, not because the score ranks outcomes; the gate abstains while this holds."
+    : calibrationReport.validated_on
+      ? `Held-out validation on ${calibrationReport.validated_on} newer outcomes. ECE ${(Number(calibrationReport.ece_before) * 100).toFixed(1)}% → ${(Number(calibrationReport.ece_after) * 100).toFixed(1)}%.`
+      : calibrationReport.reason || "Calibration is fitted from resolved outcomes once at least 60 exist.";
   $("#modelUncertainty").textContent = prediction.uncertainty == null
     ? "NO ENSEMBLE"
     : `±${(Number(prediction.uncertainty) * 100).toFixed(1)} pp · ${Number(data.ensemble_members || 0)} MEMBERS`;

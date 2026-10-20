@@ -57,6 +57,8 @@ def run_walk_forward_backtest(
     wins = losses = ties = 0
     uncertainty_abstentions = 0
     uncertainty_blocked = 0
+    flat_abstentions = 0
+    flat_blocked = 0
     ensemble_bars = 0
     net_units = 0.0
     trades: list[dict] = []
@@ -115,11 +117,13 @@ def run_walk_forward_backtest(
             _, spread = ensemble.predict(feature)
         if spread is not None:
             ensemble_bars += 1
+        calibration_flat = uses_learned_model and bool(calibrator.fitted and calibrator.flat)
         decision_options = {
             "buy_threshold": threshold,
             "sell_threshold": 1.0 - threshold,
             "uncertainty": spread,
             "max_uncertainty": max_uncertainty,
+            "calibration_flat": calibration_flat,
         }
         decision = decide(
             strategy_id,
@@ -144,6 +148,20 @@ def run_walk_forward_backtest(
                     **decision_options,
                 ).side != "NO SIGNAL":
                     uncertainty_blocked += 1
+                decision_options["uncertainty"] = spread
+            elif calibration_flat and decision.reason.startswith("Model calibration is flat"):
+                flat_abstentions += 1
+                decision_options["calibration_flat"] = False
+                if decide(
+                    strategy_id,
+                    candles[index],
+                    candles[index - 1].close,
+                    feature,
+                    probability,
+                    **decision_options,
+                ).side != "NO SIGNAL":
+                    flat_blocked += 1
+                decision_options["calibration_flat"] = True
             continue
         if exit_price == entry:
             result = "TIE"
@@ -208,6 +226,8 @@ def run_walk_forward_backtest(
         "calibrated_ece": expected_calibration_error(calibrated_points),
         "raw_log_loss": log_loss(raw_points),
         "calibrated_log_loss": log_loss(calibrated_points),
+        "levels": calibrator.levels,
+        "flat": calibrator.flat,
         "last_validation": calibration_validation,
         "note": (
             "The calibrator at each step used only outcomes that had already matured. "
@@ -244,6 +264,11 @@ def run_walk_forward_backtest(
             "abstentions": uncertainty_abstentions,
             "blocked_signals": uncertainty_blocked,
             "abstention_rate": round(uncertainty_abstentions / ensemble_bars, 4) if ensemble_bars else 0.0,
+        },
+        "calibration_gate": {
+            "flat": bool(use_calibration and calibrator.fitted and calibrator.flat),
+            "abstentions": flat_abstentions,
+            "blocked_signals": flat_blocked,
         },
         "accuracy_target": TARGET_WIN_RATE,
         "target_window": TARGET_WINDOW,

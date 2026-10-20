@@ -102,6 +102,7 @@ def decide(
     probability_calibrated: bool | None = None,
     uncertainty: float | None = None,
     max_uncertainty: float = 0.10,
+    calibration_flat: bool = False,
 ) -> Decision:
     if features is None:
         return Decision("NO SIGNAL", "Not enough completed candles to calculate indicators.", probability_up)
@@ -109,6 +110,12 @@ def decide(
         return Decision(
             "NO SIGNAL",
             f"Ensemble disagreement is {uncertainty:.3f}, wider than the {max_uncertainty:.2f} stability limit; abstaining instead of guessing.",
+            probability_up,
+        )
+    if calibration_flat:
+        return Decision(
+            "NO SIGNAL",
+            "Model calibration is flat: the score has no usable rank signal on recorded outcomes, so the gate abstains instead of trading a constant probability.",
             probability_up,
         )
 
