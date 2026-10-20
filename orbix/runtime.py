@@ -740,6 +740,3 @@ class Runtime:
                 "training_samples": learning.get("training_samples"),
             })
         return outcomes
-
-
-runtime = Runtime()

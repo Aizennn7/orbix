@@ -88,6 +88,9 @@ def _replay(runtime, count: int) -> list[dict[str, Any]]:
         return []
     model = runtime.champion_model(runtime.pair)
     model = model if model is not None and getattr(model, "trained", False) else None
+    # The live gate uses the same ensemble; without it the replay would show a
+    # different set of signals than the automation loop would have produced.
+    ensemble = runtime.get_ensemble(runtime.pair) if model is not None else None
     start = max(40, len(candles) - max(1, min(count, MAX_REPLAY_BARS)))
     rows: list[dict[str, Any]] = []
     for index in range(start, len(candles)):
@@ -99,6 +102,8 @@ def _replay(runtime, count: int) -> list[dict[str, Any]]:
                 source=runtime.source,
                 horizon=1,
                 model=model,
+                ensemble=ensemble,
+                max_uncertainty=runtime.settings["max_uncertainty"],
             )
         except ValueError:
             continue

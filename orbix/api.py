@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from .automation import AutomationService, ProviderError
 from .backtest import run_walk_forward_backtest
 from .future import build_future_plan
-from .runtime import BACKTEST_WINDOW, runtime
+from .runtime import BACKTEST_WINDOW, Runtime
 from .strategies import strategy_catalog_payload
 from .telegram import TelegramError
 
@@ -25,6 +25,9 @@ WEB_DIR = ROOT / "web"
 MAX_IMPORT_BYTES = 1024 * 1024 * 1024
 MAX_APPEND_BYTES = 64 * 1024 * 1024
 
+# Created here rather than in runtime.py so importing Runtime (tests, tooling)
+# does not open the live data store or fight a running preview for the lock.
+runtime = Runtime()
 automation = AutomationService(runtime)
 
 

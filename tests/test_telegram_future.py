@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 from orbix.automation import AutomationService
 from orbix.domain import Candle, Signal
-from orbix.future import build_future_plan
+from orbix.future import _replay, build_future_plan
 from orbix.runtime import Runtime
 from orbix.telegram import TelegramError, TelegramNotifier
 
@@ -275,6 +275,16 @@ class TelegramGuardrailTests(unittest.TestCase):
         self.assertNotIn("sig-fallback", automation._telegram_edited_result_ids)
 
 
+class WideEnsemble:
+    """Stub ensemble that always reports a spread wider than the limit."""
+
+    ready = True
+    members = [object(), object(), object()]
+
+    def predict(self, features) -> tuple[float, float]:
+        return 0.5, 0.4
+
+
 class FuturePlanTests(unittest.TestCase):
     def test_future_plan_never_invents_a_direction_and_labels_readiness(self) -> None:
         with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, TELEGRAM_ENV):
@@ -314,6 +324,25 @@ class FuturePlanTests(unittest.TestCase):
         active = [item for item in plan["alternatives"] if item["active"]]
         self.assertEqual(len(active), 1)
         self.assertEqual(active[0]["pair"], "GBP/USD")
+
+    def test_replay_applies_the_live_uncertainty_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, TELEGRAM_ENV):
+            runtime = Runtime(folder)
+            start = datetime(2026, 10, 19, 8, 0, tzinfo=UTC)
+            rows = ["timestamp,open,high,low,close,volume"]
+            for index in range(180):
+                stamp = (start + timedelta(minutes=index)).isoformat()
+                close = 1.1 + (index % 7) * 0.00005
+                rows.append(f"{stamp},{close},{close + 0.0002},{close - 0.0002},{close},{10}")
+            path = Path(folder) / "gbp.csv"
+            path.write_text("\n".join(rows), encoding="utf-8")
+            runtime.import_csv_file(path, "GBP/USD")
+            runtime.get_or_train_model("GBP/USD")
+            with patch.object(runtime, "get_ensemble", return_value=WideEnsemble()):
+                replay = _replay(runtime, 3)
+        self.assertTrue(replay)
+        self.assertTrue(all(item["side"] == "NO SIGNAL" for item in replay))
+        self.assertTrue(all("stability limit" in item["reason"] for item in replay))
 
     def test_future_windows_are_one_minute_apart(self) -> None:
         with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, TELEGRAM_ENV):
