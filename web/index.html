@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#050505">
   <title>Dashboard — Orbix Signal Lab</title>
-  <link rel="stylesheet" href="/static/styles.css?v=21">
+  <link rel="stylesheet" href="/static/styles.css?v=22">
 </head>
 <body>
   <div class="noise" aria-hidden="true"></div>
@@ -365,7 +365,15 @@
       <div class="connection-layout">
         <article class="panel provider-form-panel">
           <div class="panel-heading"><div><div class="eyebrow small-eyebrow">LOCAL REFERENCE ONLY</div><h2>Provider notes</h2></div><span class="mode-tag">NOT CONNECTED</span></div>
-          <p class="panel-intro">These browser-only fields are not used by Orbix’s built-in integrations. Use the server environment variables listed in README to connect Twelve Data and Finnhub; never paste production secrets here.</p>
+          <p class="panel-intro">These browser-only fields are not used by Orbix’s built-in integrations. Use the server environment variables below to connect Twelve Data and Finnhub; never paste production secrets into this page.</p>
+          <div class="env-guide">
+            <span class="field-label">PROJECT-ROOT .ENV · LOADED ON SERVER START</span>
+            <pre class="env-snippet">ORBIX_TWELVE_DATA_API_KEY=your_key
+ORBIX_FINNHUB_API_KEY=your_key
+ORBIX_TELEGRAM_BOT_TOKEN=your_bot_token
+ORBIX_TELEGRAM_CHAT_ID=-100...</pre>
+            <p class="micro-copy">Save the file as <code>.env</code> beside <code>pyproject.toml</code>, then restart Orbix. Exported shell or Docker variables win; <code>ORBIX_ENV_FILE</code> selects a different file. The file is ignored by Git — never commit or share it.</p>
+          </div>
           <label class="field-label" for="providerName">Provider note</label>
           <input class="provider-input" id="providerName" type="text" placeholder="e.g. Your FX data provider" autocomplete="off" maxlength="80">
           <label class="field-label" for="providerApiUrl">Endpoint note · not called</label>
@@ -604,6 +612,6 @@
     <p>Signal research only. Live feeds are optional/configured on the server. No Quotex login or real trades.</p>
     <span class="footer-right">BUILT FOR BETTER QUESTIONS</span>
   </footer>
-  <script src="/static/app.js?v=21" defer></script>
+  <script src="/static/app.js?v=22" defer></script>
 </body>
 </html>
