@@ -17,3 +17,10 @@ session_secret.tmp
 # Deployment artifacts
 release.zip
 app.zip
+
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+*.apk

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Orbix</string>
+    <string name="status_checking">Looking for the local server…</string>
+    <string name="status_live">LIVE · 127.0.0.1:8000</string>
+    <string name="status_offline">OFFLINE SNAPSHOT · no local server</string>
+    <string name="status_failed">Load failed · tap Reload</string>
+    <string name="action_reload">Reload</string>
+</resources>

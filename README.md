@@ -109,6 +109,24 @@ PORT=10000 ORBIX_DATA_DIR=/var/lib/orbix bash startup.sh
 
 Point the platform's health check at `/healthz` and keep the data directory on a real disk.
 
+### Android APK
+
+Every push builds a sideloadable APK and attaches it to the [`android-latest` release](https://github.com/Aizennn7/orbix/releases/tag/android-latest). It is a WebView shell with two modes: the live app when the Termux server answers on `127.0.0.1:8000`, and the bundled read-only snapshot otherwise. It is debug-signed, so install it by sideloading; it is not a Play Store build.
+
+Source lives in `android/` — one Activity, no third-party dependencies. The build runs in `.github/workflows/android.yml` because it needs an Android SDK.
+
+### Android phone (Termux)
+
+The full app runs on an ARM64 phone inside a Debian container managed by Termux, reached at `http://127.0.0.1:8000` from the phone's own browser. No APK is involved; Android cannot run Python natively.
+
+```bash
+# in Termux, from F-Droid
+curl -fsSL https://raw.githubusercontent.com/Aizennn7/orbix/main/scripts/termux-setup.sh -o termux-setup.sh
+bash termux-setup.sh
+```
+
+See [TERMUX.md](TERMUX.md) for the walkthrough, the home-screen widget, battery settings, and the Android 12 process-killer caveat.
+
 ## Run it without live credentials
 
 ```bash
