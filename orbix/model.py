@@ -52,6 +52,7 @@ class OnlineLogisticModel:
     bias: float = 0.0
     training_samples: int = 0
     calibrator: IsotonicCalibrator = field(default_factory=IsotonicCalibrator)
+    calibration_report: dict | None = None
     validation_log_loss: float | None = None
     trained_at: str | None = None
 
@@ -252,6 +253,7 @@ class OnlineLogisticModel:
             "validation_log_loss": self.validation_log_loss,
             "trained_at": self.trained_at,
             "calibration": self.calibrator.to_dict(),
+            "calibration_report": self.calibration_report,
         }
 
     @classmethod
@@ -274,6 +276,8 @@ class OnlineLogisticModel:
         model.validation_log_loss = payload.get("validation_log_loss")
         model.trained_at = payload.get("trained_at")
         model.calibrator = IsotonicCalibrator.from_dict(payload.get("calibration"))
+        report = payload.get("calibration_report")
+        model.calibration_report = dict(report) if isinstance(report, dict) else None
         if model.weights and len(model.weights) != len(model.feature_names):
             raise ValueError("Saved model feature count does not match its weights")
         if model.weights and (len(model.means) != len(model.feature_names) or len(model.scales) != len(model.feature_names)):

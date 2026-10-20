@@ -156,6 +156,24 @@ class ModelTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "feature version"):
             OnlineLogisticModel.from_dict(stale)
 
+    def test_calibration_report_survives_a_model_round_trip(self) -> None:
+        _, _, samples = demo_samples(360)
+        model = OnlineLogisticModel().fit(samples)
+        model.calibrator = IsotonicCalibrator(thresholds=[0.45, 0.55], values=[0.42, 0.58], samples=120)
+        model.calibration_report = {
+            "accepted": False,
+            "levels": 2,
+            "flat": False,
+            "reason": "Held-out calibration did not improve both Brier score and ECE; the previous mapping was kept.",
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "model.json"
+            model.save(path)
+            loaded = OnlineLogisticModel.load(path)
+        self.assertEqual(loaded.calibration_report["levels"], 2)
+        self.assertFalse(loaded.calibration_report["accepted"])
+        self.assertEqual(loaded.calibrator.levels, 2)
+
     def test_prediction_uses_calibrator_and_reports_uncertainty(self) -> None:
         _, rows, samples = demo_samples()
         model = OnlineLogisticModel().fit(samples)
@@ -276,6 +294,8 @@ class LearningEngineTests(unittest.TestCase):
             status = engine.status()
             self.assertEqual(status["tracker"]["samples"], 80)
             self.assertIn(status["drift"]["state"], {"warming", "stable", "improving", "drift"})
+            self.assertTrue(any(event["kind"] == "calibration" for event in status["events"]))
+            self.assertTrue(all(event["at"] and event["detail"] for event in status["events"]))
 
     def test_split_calibration_validates_on_newer_outcomes(self) -> None:
         _, _, samples = demo_samples()
@@ -430,6 +450,9 @@ class RuntimeLearningTests(unittest.TestCase):
             card = runtime.model_card("EUR/USD")
             self.assertEqual(card["prequential"]["samples"], 1)
             self.assertEqual(card["prequential"]["correct"], int(summary["prequential_correct_predictions"]))
+            self.assertEqual(card["reliability_samples"], 1)
+            self.assertEqual(sum(bucket["count"] for bucket in card["reliability"]), 1)
+            self.assertEqual(card["learning_counts"]["accepted_updates"], 1)
             runtime.candle_store.close()
 
     def test_demo_cannot_retrain_or_roll_back(self) -> None:

@@ -1570,6 +1570,75 @@ function renderModelCard(data) {
     });
   }
 
+  const reliability = $("#modelReliability");
+  reliability.replaceChildren();
+  if (!data.reliability?.length) {
+    const empty = document.createElement("p");
+    empty.className = "dataset-empty";
+    empty.textContent = "Resolve imported outcomes to see a reliability curve.";
+    reliability.append(empty);
+  } else {
+    const header = document.createElement("div");
+    header.className = "reliability-row reliability-head";
+    ["BUCKET", "ISSUED", "OBSERVED", "N"].forEach((text) => {
+      const cell = document.createElement("span");
+      cell.textContent = text;
+      header.append(cell);
+    });
+    reliability.append(header);
+    data.reliability.forEach((bin) => {
+      const row = document.createElement("div");
+      row.className = "reliability-row";
+      const bucket = document.createElement("span");
+      bucket.textContent = `${(Number(bin.lower) * 100).toFixed(0)}–${(Number(bin.upper) * 100).toFixed(0)}%`;
+      const issued = document.createElement("span");
+      issued.textContent = `${(Number(bin.mean_predicted) * 100).toFixed(1)}%`;
+      const observed = document.createElement("strong");
+      observed.textContent = `${(Number(bin.observed) * 100).toFixed(1)}%`;
+      const count = document.createElement("span");
+      count.textContent = Number(bin.count).toLocaleString();
+      row.append(bucket, issued, observed, count);
+      reliability.append(row);
+    });
+    const note = document.createElement("p");
+    note.className = "micro-copy";
+    note.textContent = `${Number(data.reliability_samples || 0).toLocaleString()} recent outcomes scored by the current champion. Descriptive only; small buckets are noisy.`;
+    reliability.append(note);
+  }
+
+  const learningLog = $("#modelLearningLog");
+  learningLog.replaceChildren();
+  const events = [...(data.learning_events || [])].reverse().slice(0, 6);
+  if (!events.length) {
+    const empty = document.createElement("p");
+    empty.className = "dataset-empty";
+    empty.textContent = "No guarded rejections or calibration changes this session.";
+    learningLog.append(empty);
+  } else {
+    const labels = {
+      update_rejected: "UPDATE REJECTED",
+      calibration: "CALIBRATION",
+      promotion: "PROMOTION",
+      rollback: "ROLLBACK",
+    };
+    events.forEach((event) => {
+      const row = document.createElement("div");
+      row.className = "learning-event";
+      row.dataset.kind = event.kind;
+      const meta = document.createElement("span");
+      const at = event.at ? new Date(event.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+      meta.textContent = `${labels[event.kind] || String(event.kind || "EVENT").toUpperCase()}${at ? ` · ${at}` : ""}`;
+      const detail = document.createElement("strong");
+      detail.textContent = event.detail || "";
+      row.append(meta, detail);
+      learningLog.append(row);
+    });
+  }
+  const counts = data.learning_counts;
+  $("#modelLearningCounts").textContent = counts
+    ? `This session: accepted updates ${Number(counts.accepted_updates || 0).toLocaleString()} · rejected ${Number(counts.rejected_updates || 0).toLocaleString()} · recalibrations ${Number(counts.recalibrations || 0).toLocaleString()} · promotions ${Number(counts.promotions || 0).toLocaleString()} · rollbacks ${Number(counts.rollbacks || 0).toLocaleString()}.`
+    : "";
+
   const prequential = data.prequential;
   const recordText = prequential?.samples
     ? ` Prequential record: ${Number(prequential.correct).toLocaleString()}/${Number(prequential.samples).toLocaleString()} correct (${(Number(prequential.accuracy) * 100).toFixed(1)}%, 95% Wilson ${(Number(prequential.accuracy_ci95.lower) * 100).toFixed(1)}–${(Number(prequential.accuracy_ci95.upper) * 100).toFixed(1)}%); Brier ${Number(prequential.brier).toFixed(3)}; majority-class baseline ${(Number(prequential.majority_baseline_accuracy) * 100).toFixed(1)}%.`

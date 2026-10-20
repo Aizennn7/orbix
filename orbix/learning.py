@@ -329,6 +329,10 @@ class SelfLearningEngine:
     last_rejection_reason: str | None = None
     updates_since_calibration: int = 0
     version: str | None = None
+    events: deque = field(default_factory=lambda: deque(maxlen=25))
+
+    def _event(self, kind: str, detail: str) -> None:
+        self.events.append({"at": _now().isoformat(), "kind": kind, "detail": detail})
 
     def observe(
         self,
@@ -383,6 +387,7 @@ class SelfLearningEngine:
                 f"Update reverted: replay log loss rose from {before_loss:.4f} to {after_loss:.4f}."
             )
             reason = self.last_rejection_reason
+            self._event("update_rejected", reason)
         if accepted:
             self.accepted_updates += 1
             self.updates_since_calibration += 1
@@ -432,11 +437,16 @@ class SelfLearningEngine:
         self.updates_since_calibration = 0
         calibrator, report = fit_validated(points_for(pairs))
         self.calibration_report = report
+        # Persist the last attempt with the champion so the assessment survives
+        # a restart even when the fit was rejected and the old map kept.
+        model.calibration_report = dict(report)
         if not report.get("accepted") or not calibrator.fitted:
+            self._event("calibration", report.get("reason") or "Calibration fit was not accepted.")
             return report
 
         model.calibrator = calibrator
         self.recalibrations += 1
+        self._event("calibration", report.get("reason") or "Calibration accepted.")
         self.calibration_samples = report["samples"]
         self.last_calibration_at = _now().isoformat()
         return report
@@ -463,10 +473,12 @@ class SelfLearningEngine:
     def register_promotion(self, version: str) -> None:
         self.promotions += 1
         self.version = version
+        self._event("promotion", f"Validated snapshot {version} promoted.")
 
     def register_rollback(self, version: str | None) -> None:
         self.rollbacks += 1
         self.version = version
+        self._event("rollback", f"Restored snapshot {version}.")
 
     # ------------------------------------------------------------------ status
     def status(self) -> dict:
@@ -488,6 +500,7 @@ class SelfLearningEngine:
             "calibration": self.calibration_report,
             "last_calibration_at": self.last_calibration_at,
             "last_update_at": self.last_update_at,
+            "events": list(self.events),
             "last_rejection_reason": self.last_rejection_reason,
             "updates_since_calibration": self.updates_since_calibration,
             "recalibrate_every": self.recalibrate_every,

@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import threading
 
+from .calibration import reliability_bins
 from .candle_store import CandleStore, TAIL_ROWS
 from .domain import Candle, parse_datetime
 from .engine import PredictionEngine
@@ -36,11 +37,16 @@ def _safe_pair(pair: str) -> str:
     return re.sub(r"[^A-Za-z0-9_-]+", "_", pair).strip("_") or "pair"
 
 
+def _default_data_dir() -> Path:
+    configured = os.environ.get("ORBIX_DATA_DIR", "").strip()
+    return Path(configured).expanduser() if configured else DATA_DIR
+
+
 class Runtime:
     """Application state with a durable candle archive and a bounded hot window."""
 
-    def __init__(self, data_dir: str | Path = DATA_DIR) -> None:
-        self.data_dir = Path(data_dir)
+    def __init__(self, data_dir: str | Path | None = None) -> None:
+        self.data_dir = Path(data_dir) if data_dir is not None else _default_data_dir()
         self.model_dir = self.data_dir / "models"
         self.lock = threading.RLock()
         self.candle_store = CandleStore(self.data_dir / "candles.duckdb")
@@ -628,6 +634,14 @@ class Runtime:
             )
             engine = self.learning_engine(pair) if self.source == "IMPORTED CSV" else None
             registry = self._registry(pair) if self.source == "IMPORTED CSV" else None
+            reliability: list[dict] = []
+            reliability_samples = 0
+            if engine is not None and model.trained and engine.replay:
+                replay_rows = list(engine.replay)[-200:]
+                points = [(model.predict_calibrated(features), label) for features, label in replay_rows]
+                reliability = reliability_bins(points, bins=5)
+                reliability_samples = len(points)
+            learning_status = engine.status() if engine is not None else None
             return {
                 "pair": pair,
                 "source": self.source,
@@ -640,12 +654,24 @@ class Runtime:
                 "trained_at": model.trained_at,
                 "calibrated": model.calibrator.fitted,
                 "calibration_samples": model.calibrator.samples,
-                "calibration_report": engine.calibration_report if engine else None,
+                "calibration_report": (
+                    engine.calibration_report
+                    if engine is not None and engine.calibration_report
+                    else model.calibration_report
+                ),
                 "prediction": prediction.to_dict() if prediction else None,
                 "uncertainty_limit": self.settings["max_uncertainty"],
                 "ensemble_members": len(ensemble.members) if ensemble and ensemble.ready else 0,
                 "drift": engine.drift.peek(engine.tracker.errors()) if engine else {"state": "untracked"},
                 "prequential": engine.tracker.summary() if engine else None,
+                "reliability": reliability,
+                "reliability_samples": reliability_samples,
+                "reliability_note": (
+                    "Recent resolved outcomes scored by the current champion. Descriptive, not a forecast; "
+                    "small buckets are noisy."
+                ),
+                "learning_events": learning_status["events"] if learning_status else [],
+                "learning_counts": learning_status["counts"] if learning_status else None,
                 "versions": registry.list_versions(limit=8) if registry else [],
                 "active_version": registry.active_version() if registry else None,
                 "by_strategy": self.ledger.learning_by_strategy(dataset_id=self.dataset_id()),
@@ -698,6 +724,7 @@ class Runtime:
             "calibrated": bool(model and model.calibrator.fitted),
             "calibration_samples": model.calibrator.samples if model else 0,
             "validation_log_loss": model.validation_log_loss if model else None,
+            "calibration_report": model.calibration_report if model else None,
             "drift": engine.drift.peek(engine.tracker.errors()) if engine else {"state": "untracked"},
             "learning_engine": engine.status() if engine else None,
             "versions": registry.list_versions(limit=8) if registry else [],
