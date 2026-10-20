@@ -33,7 +33,7 @@ The bar at the top always says which mode is active:
 
 Tap **Reload** after starting Termux to switch to live. Links to brokers and other sites open in your normal browser.
 
-The APK is signed with a debug key. That is fine for sideloading your own build, but it cannot be uploaded to the Play Store without a release key.
+The APK is signed with a debug key. That is fine for sideloading your own build, but it cannot be uploaded to the Play Store without a release key. Because the key is generated fresh on each build, a newer APK may refuse to install over an older one — uninstall the old app first. Nothing is lost, because all state lives in Termux, not in the APK.
 
 ---
 

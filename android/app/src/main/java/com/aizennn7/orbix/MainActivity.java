@@ -102,6 +102,15 @@ public class MainActivity extends Activity {
             public void onPageFinished(WebView view, String url) {
                 progress.setVisibility(View.GONE);
             }
+
+            @Override
+            public void onReceivedError(WebView view, WebResourceRequest request,
+                                        android.webkit.WebResourceError error) {
+                if (request.isForMainFrame()) {
+                    progress.setVisibility(View.GONE);
+                    status.setText(R.string.status_failed);
+                }
+            }
         });
 
         web.setWebChromeClient(new WebChromeClient() {

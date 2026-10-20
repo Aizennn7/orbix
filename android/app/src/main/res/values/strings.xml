@@ -4,5 +4,6 @@
     <string name="status_checking">Looking for the local server…</string>
     <string name="status_live">LIVE · 127.0.0.1:8000</string>
     <string name="status_offline">OFFLINE SNAPSHOT · no local server</string>
+    <string name="status_failed">Load failed · tap Reload</string>
     <string name="action_reload">Reload</string>
 </resources>
