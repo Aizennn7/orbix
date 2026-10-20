@@ -401,21 +401,98 @@ function renderSignal(signal) {
   refreshHistory();
 }
 
+function renderScan(scan) {
+  const results = scan.results || [];
+  const summary = $("#scanSummary");
+  const recordNote = !scan.recorded
+    ? ""
+    : scan.recorded.already_recorded
+      ? " · BEST ALREADY RECORDED"
+      : " · BEST RECORDED";
+  summary.textContent = `${scan.qualified || 0} / ${results.length} QUALIFIED${recordNote}`;
+  const body = $("#scanRows");
+  body.replaceChildren();
+  if (!results.length) {
+    const row = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = 5;
+    cell.className = "empty-row";
+    cell.textContent = "The scan returned no methods.";
+    row.appendChild(cell);
+    body.appendChild(row);
+  } else {
+    for (const result of results) {
+      const row = document.createElement("tr");
+      const recorded = Boolean(scan.recorded && scan.recorded.strategy === result.strategy && scan.recorded.side === result.side);
+      const method = document.createElement("td");
+      method.textContent = result.strategy_name || result.strategy;
+      if (recorded) {
+        const marker = document.createElement("strong");
+        marker.textContent = " · RECORDED";
+        method.appendChild(marker);
+      }
+      const side = document.createElement("td");
+      side.textContent = result.side || "NO SIGNAL";
+      const grade = document.createElement("td");
+      grade.textContent = result.side === "NO SIGNAL" ? "—" : (result.grade || "—");
+      const model = document.createElement("td");
+      model.textContent = result.probability_up == null
+        ? "—"
+        : `${(Number(result.probability_up) * 100).toFixed(1)}%${result.probability_calibrated ? " cal" : " raw"}`;
+      const why = document.createElement("td");
+      why.textContent = String(result.reason || "").slice(0, 180);
+      why.title = result.reason || "";
+      row.append(method, side, grade, model, why);
+      body.appendChild(row);
+    }
+  }
+  const note = $("#scanNote");
+  if (scan.news_guard?.status === "BLACKOUT") {
+    note.textContent = `News blackout: ${scan.news_guard.message} No method is allowed to record a signal.`;
+  } else if (scan.record_error) {
+    note.textContent = `The scan ran, but recording the best read failed: ${scan.record_error}`;
+  } else if (scan.recorded?.already_recorded) {
+    note.textContent = "This candle already has a paper trade from the best method, so the scan showed it instead of writing a duplicate.";
+  } else {
+    note.textContent = "Every executable method was evaluated on the same candle with the same model and ensemble. Only the strictest qualified read was recorded.";
+  }
+}
+
 async function generateSignal() {
   const button = $("#generateButton");
   button.disabled = true;
-  button.querySelector("span:first-child").textContent = "ANALYZING…";
+  button.querySelector("span:first-child").textContent = "TESTING 6 METHODS…";
   try {
-    const signal = await api("/api/signal", {
+    const scan = await api("/api/signals/scan", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         pair: $("#pairSelect").value || state.market?.pair || "EUR/USD",
-        strategy: $("#strategySelect").value,
         horizon: 1,
+        record: true,
       }),
     });
-    renderSignal(signal);
+    renderScan(scan);
+    if (scan.recorded) {
+      renderSignal(scan.recorded);
+    } else {
+      renderSignal({
+        side: "NO SIGNAL",
+        strategy: "scan",
+        pair: scan.pair,
+        heading: "ALL STRATEGIES · NO SIGNAL",
+        reason: scan.qualified
+          ? `A method qualified, but the best read could not be recorded: ${scan.record_error || "unknown reason"}.`
+          : `Tested ${(scan.results || []).length} methods; none qualified on this candle.`,
+        entry_time: scan.entry_time,
+        prediction_time: scan.prediction_time,
+        generated_at: new Date().toISOString(),
+        probability_up: null,
+        probability_calibrated: false,
+        contributions: [],
+        news_guard: scan.news_guard,
+      });
+    }
     void loadModelCard();
   } catch (error) {
     $("#signalSide").textContent = "ENGINE ERROR";
@@ -423,7 +500,7 @@ async function generateSignal() {
     $("#signalGlyph").textContent = "!";
   } finally {
     button.disabled = false;
-    button.querySelector("span:first-child").textContent = "GENERATE SIGNAL";
+    button.querySelector("span:first-child").textContent = "TEST ALL STRATEGIES";
   }
 }
 

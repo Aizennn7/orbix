@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#050505">
   <title>Dashboard — Orbix Signal Lab</title>
-  <link rel="stylesheet" href="/static/styles.css?v=19">
+  <link rel="stylesheet" href="/static/styles.css?v=20">
 </head>
 <body>
   <div class="noise" aria-hidden="true"></div>
@@ -153,7 +153,7 @@
             <div><div class="eyebrow small-eyebrow">PREDICTION ENGINE</div><h2>Signal output <span class="small-pair" id="enginePairLabel">EUR/USD · M1</span></h2></div>
             <span class="mode-tag">PAPER</span>
           </div>
-          <label class="field-label" for="strategySelect">Signal method</label>
+          <label class="field-label" for="strategySelect">Backtest method</label>
           <select id="strategySelect" class="select-control full-width"><option value="orbix_confluence">Orbix Confluence Gate</option><option value="ml_consensus">Orbix ML + trend agreement</option><option value="orbix_cadence">Orbix Cadence Read (3-min collection)</option></select>
           <div class="signal-result" id="signalResult">
             <div class="signal-glyph" id="signalGlyph">◌</div>
@@ -174,8 +174,8 @@
             <p id="newsGuardDetail">No fresh event calendar is connected; automatic signals remain paused.</p>
             <div id="upcomingEvents" class="upcoming-events"></div>
           </div>
-          <button class="button button-primary generate-button" id="generateButton"><span>GENERATE SIGNAL</span><span class="button-arrow">↗</span></button>
-          <p class="micro-copy">The Orbix Confluence Gate is a strict rule set, not a sureshot. Model probabilities are calibrated only after enough resolved outcomes exist, and calibration describes the past. News events trigger abstention, not a guessed direction.</p>
+          <button class="button button-primary generate-button" id="generateButton"><span>TEST ALL STRATEGIES</span><span class="button-arrow">↗</span></button>
+          <p class="micro-copy">The scan tests all six executable methods on the same closed candle and records only the strictest qualified read. The selector above drives the walk-forward backtest. A rule set is not a sureshot; model probabilities are calibrated only after enough resolved outcomes exist, and calibration describes the past.</p>
         </article>
         <aside class="panel engine-notes">
           <div class="eyebrow small-eyebrow">HOW TO READ IT</div><h2>Signal, not autopilot.</h2>
@@ -186,6 +186,19 @@
           <a class="text-button inline-link" href="#dashboard" data-route="dashboard">CHANGE PAIR ON DASHBOARD ↗</a>
         </aside>
       </div>
+      <article class="panel strategy-scan-panel">
+        <div class="panel-heading">
+          <div><div class="eyebrow small-eyebrow">ALL METHODS · ONE CLICK</div><h2>Strategy scan</h2></div>
+          <span class="mode-tag" id="scanSummary">NOT RUN</span>
+        </div>
+        <div class="history-table-wrap">
+          <table class="history-table">
+            <thead><tr><th>METHOD</th><th>SIDE</th><th>GRADE</th><th>MODEL</th><th>WHY</th></tr></thead>
+            <tbody id="scanRows"><tr><td colspan="5" class="empty-row">Test all strategies to compare every method on the latest closed candle.</td></tr></tbody>
+          </table>
+        </div>
+        <p class="micro-copy" id="scanNote">Every executable method is evaluated on the same candle with the same model and ensemble. The scan itself writes nothing; only the best qualified read is recorded as a paper signal. The strictest confirmed method wins a tie, so the loose cadence read cannot outrank a rule-confirmed setup.</p>
+      </article>
       <article class="panel model-lab-panel" aria-labelledby="modelLabTitle">
         <div class="panel-heading">
           <div><div class="eyebrow small-eyebrow">PREDICTION + SELF-LEARNING</div><h2 id="modelLabTitle">Model calibration &amp; drift</h2></div>
@@ -560,6 +573,6 @@
     <p>Signal research only. Live feeds are optional/configured on the server. No Quotex login or real trades.</p>
     <span class="footer-right">BUILT FOR BETTER QUESTIONS</span>
   </footer>
-  <script src="/static/app.js?v=19" defer></script>
+  <script src="/static/app.js?v=20" defer></script>
 </body>
 </html>

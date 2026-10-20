@@ -536,6 +536,9 @@ h2 { font-size: 18px; font-weight: 530; letter-spacing: -.035em; margin: 0; }
 
 /* Prediction engine + self-learning panel */
 .model-lab-panel { margin-top: 14px; padding: 22px; }
+.strategy-scan-panel { margin-top: 14px; padding: 22px; }
+.strategy-scan-panel .micro-copy { margin-top: 13px; }
+.strategy-scan-panel .history-table td:nth-child(2) { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .model-grid { margin-top: 15px; }
 .model-columns { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 26px; margin-top: 20px; }
 .contribution-list, .model-version-list, .model-strategy-list { display: grid; gap: 0; margin-bottom: 18px; }

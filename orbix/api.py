@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from .automation import AutomationService, ProviderError
 from .backtest import run_walk_forward_backtest
+from .domain import parse_datetime
 from .future import build_future_plan
 from .runtime import BACKTEST_WINDOW, Runtime
 from .strategies import strategy_catalog_payload
@@ -53,6 +54,12 @@ class SignalRequest(BaseModel):
     pair: str = "EUR/USD"
     strategy: str = "ml_consensus"
     horizon: int = Field(default=1, ge=1, le=60)
+
+
+class ScanRequest(BaseModel):
+    pair: str = "EUR/USD"
+    horizon: int = Field(default=1, ge=1, le=60)
+    record: bool = True
 
 
 class BacktestRequest(BaseModel):
@@ -380,6 +387,77 @@ def market(pair: str = "EUR/USD", limit: int = 180) -> dict:
 @app.get("/api/strategies")
 def strategies() -> dict:
     return strategy_catalog_payload()
+
+
+@app.post("/api/signals/scan")
+def scan_signals(payload: ScanRequest) -> dict:
+    """Test every executable strategy on the same closed candle.
+
+    The scan itself is read-only. When `record` is true it creates one paper
+    signal from the strictest qualified method, never one per strategy.
+    """
+    pair = payload.pair.upper().strip()
+    guard = automation.evaluate_news(pair)
+    safety_reason = guard["message"] if guard["status"] == "BLACKOUT" else None
+    market_status = automation.status()["market"]
+    is_live = bool(
+        market_status["connected"]
+        and market_status["active_dataset_is_provider"]
+        and market_status["data_fresh"]
+    )
+    try:
+        scan = runtime.scan_strategies(
+            pair,
+            payload.horizon,
+            generated_at=datetime.now(timezone.utc),
+            is_live=is_live,
+            safety_filter_reason=safety_reason,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    scan["news_guard"] = guard
+    scan["automatic"] = False
+    scan["recorded"] = None
+    best = scan.get("best")
+    if payload.record and best is not None:
+        strategy_names = {
+            item["id"]: item["name"] for item in strategy_catalog_payload()["executable"]
+        }
+        best_name = strategy_names.get(best["strategy"], best["strategy"])
+        already_recorded = False
+        if best.get("entry_time"):
+            already_recorded = runtime.ledger.has_signal_for_time(
+                pair, best["strategy"], scan["dataset_id"], parse_datetime(best["entry_time"])
+            )
+        if already_recorded:
+            # Clicking the scan twice on the same candle must not pretend to
+            # write a second paper trade: the ledger keeps one per entry.
+            scan["recorded"] = {
+                **best,
+                "heading": f"BEST · {best_name} · {best['side']} · ALREADY RECORDED",
+                "already_recorded": True,
+                "news_guard": guard,
+                "automatic": False,
+            }
+        else:
+            try:
+                recorded = runtime.generate_signal(
+                    pair,
+                    best["strategy"],
+                    payload.horizon,
+                    generated_at=datetime.now(timezone.utc),
+                    is_live=is_live,
+                    safety_filter_reason=safety_reason,
+                )
+            except ValueError as exc:
+                scan["record_error"] = str(exc)[:240]
+            else:
+                recorded["heading"] = f"BEST · {best_name} · {recorded['side']}"
+                recorded["already_recorded"] = False
+                recorded["news_guard"] = guard
+                recorded["automatic"] = False
+                scan["recorded"] = recorded
+    return scan
 
 
 @app.post("/api/signal")

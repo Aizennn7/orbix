@@ -25,6 +25,7 @@ from .model import (
     train_from_candles,
 )
 from .prediction import build_prediction
+from .strategies import EXECUTABLE_STRATEGIES
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,6 +34,16 @@ SIGNAL_WINDOW = 720
 MODEL_TRAINING_WINDOW = 5_000
 BACKTEST_WINDOW = 2_500
 VALIDATION_FRACTION = 0.15
+# Strictest first. A scan records one paper signal, so a rule-confirmed read
+# outranks the deliberately loose cadence mode on the same candle.
+SCAN_ORDER = (
+    "orbix_confluence",
+    "ml_consensus",
+    "trend_pullback",
+    "range_reversal",
+    "breakout",
+    "orbix_cadence",
+)
 
 
 def _safe_pair(pair: str) -> str:
@@ -635,6 +646,101 @@ class Runtime:
             }
 
     # ------------------------------------------------------------------ signals
+    def scan_strategies(
+        self,
+        pair: str,
+        horizon: int = 1,
+        *,
+        generated_at: datetime | None = None,
+        is_live: bool = False,
+        safety_filter_reason: str | None = None,
+    ) -> dict:
+        """Evaluate every executable strategy on the latest closed candle.
+
+        This is a research scan: it does not write signals or abstentions to the
+        ledger. The caller can record the best qualified read as one paper
+        signal. All methods share the same model and ensemble so the comparison
+        is like-for-like.
+        """
+        pair = pair.upper().strip()
+        with self.lock:
+            if self.source == "SYNTHETIC DEMO":
+                self.set_demo_pair(pair)
+            elif pair != self.pair:
+                raise ValueError(f"Imported CSV data is for {self.pair}; reset to demo to switch pairs")
+            model: OnlineLogisticModel | None = None
+            try:
+                model = self.get_or_train_model(pair)
+            except ValueError:
+                model = None
+            ensemble = self.get_ensemble(pair) if model is not None else None
+            priority = {strategy: index for index, strategy in enumerate(SCAN_ORDER)}
+            results: list[dict] = []
+            for strategy in EXECUTABLE_STRATEGIES:
+                strategy_id = strategy["id"]
+                try:
+                    signal, _, _ = self.engine.generate_signal(
+                        candles=self.candles,
+                        pair=pair,
+                        strategy_id=strategy_id,
+                        source=self.source,
+                        horizon=horizon,
+                        model=model,
+                        generated_at=generated_at,
+                        is_live=is_live,
+                        ensemble=ensemble,
+                        max_uncertainty=self.settings["max_uncertainty"],
+                    )
+                except (ValueError, RuntimeError) as exc:
+                    results.append({
+                        "strategy": strategy_id,
+                        "strategy_name": strategy["name"],
+                        "pair": pair,
+                        "side": "NO SIGNAL",
+                        "reason": str(exc)[:400],
+                        "entry_time": None,
+                        "prediction_time": None,
+                        "probability_up": None,
+                        "probability_raw": None,
+                        "probability_calibrated": False,
+                        "uncertainty": None,
+                        "grade": "-",
+                        "conviction": None,
+                        "conviction_label": "not evaluated",
+                    })
+                    continue
+                if safety_filter_reason:
+                    signal = replace(signal, side="NO SIGNAL", reason=safety_filter_reason)
+                payload = signal.to_dict()
+                payload.pop("signal_id", None)
+                payload["strategy_name"] = strategy["name"]
+                grade = self.discipline.grade(
+                    payload.get("probability_up"), payload.get("uncertainty")
+                )
+                payload["grade"] = grade["grade"]
+                payload["conviction"] = grade["score"]
+                payload["conviction_label"] = grade["label"]
+                results.append(payload)
+            results.sort(key=lambda item: priority.get(item["strategy"], 99))
+            qualified = [item for item in results if item["side"] in {"BUY", "SELL"}]
+            best = qualified[0] if qualified else None
+            entry_time = next(
+                (item["entry_time"] for item in results if item.get("entry_time")), None
+            )
+            prediction_time = next(
+                (item["prediction_time"] for item in results if item.get("prediction_time")), None
+            )
+            return {
+                "pair": pair,
+                "source": self.source,
+                "dataset_id": self.dataset_id(),
+                "entry_time": entry_time,
+                "prediction_time": prediction_time,
+                "results": results,
+                "qualified": len(qualified),
+                "best": best,
+            }
+
     def generate_signal(
         self,
         pair: str,
