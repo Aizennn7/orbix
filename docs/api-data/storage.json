@@ -1,0 +1,17 @@
+{
+  "active_candles": 0,
+  "active_dataset_id": null,
+  "active_pair": null,
+  "active_source": "SYNTHETIC DEMO",
+  "active_window_in_memory": 720,
+  "backtest_window": 2500,
+  "candles_archived": 0,
+  "database_bytes": 12288,
+  "datasets": [],
+  "datasets_archived": 0,
+  "engine": "DuckDB",
+  "model_training_window": 5000,
+  "path": "/tmp/orbix-preview/candles.duckdb",
+  "signal_window_limit": 720,
+  "tail_rows": 10000
+}

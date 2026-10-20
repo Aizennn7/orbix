@@ -1,0 +1,35 @@
+{
+  "auto_post_block_reason": null,
+  "auto_post_enabled": false,
+  "automatic_signals_active": false,
+  "can_auto_post": false,
+  "configured": false,
+  "cooldown_seconds": 60,
+  "daily_cap": 40,
+  "edited_result_count": 0,
+  "edited_result_ids": [],
+  "last_error": null,
+  "last_message_id": null,
+  "last_sent_at": null,
+  "latest_auto_signal": null,
+  "recent_signals": [],
+  "sent_result_count": 0,
+  "sent_result_ids": [],
+  "sent_signal_count": 0,
+  "sent_signal_ids": [],
+  "sent_today": 0,
+  "setup": {
+    "auto_post_env": "ORBIX_TELEGRAM_AUTO_POST",
+    "bot_token_env": "ORBIX_TELEGRAM_BOT_TOKEN",
+    "chat_id_env": "ORBIX_TELEGRAM_CHAT_ID",
+    "steps": [
+      "Create the bot with @BotFather and copy its token into ORBIX_TELEGRAM_BOT_TOKEN.",
+      "Add the bot to the target channel as an administrator with 'Post messages'.",
+      "Use the numeric -100... channel id (or @channelusername) in ORBIX_TELEGRAM_CHAT_ID.",
+      "Restart the server, then press TEST CONNECTION before the one-click send."
+    ],
+    "timezone_env": "ORBIX_TELEGRAM_TIMEZONE"
+  },
+  "target_chat": null,
+  "timezone": "Asia/Kolkata"
+}

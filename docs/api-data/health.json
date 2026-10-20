@@ -1,0 +1,26 @@
+{
+  "archived_candles": 0,
+  "automatic_signals_active": false,
+  "candles_in_memory": 720,
+  "candles_loaded": 720,
+  "clock": {
+    "data_time": "2026-10-20T08:57:00Z",
+    "lag_seconds": 607.6,
+    "mode": "LIVE",
+    "reference": "2026-10-20T09:07:07.554817Z",
+    "server_time": "2026-10-20T09:07:07.554817Z",
+    "source": "SYNTHETIC DEMO"
+  },
+  "dashboard_auth_enabled": false,
+  "dashboard_auth_error": null,
+  "data_source": "SYNTHETIC DEMO",
+  "env_file_loaded": false,
+  "event_calendar_connected": false,
+  "live_feed_connected": false,
+  "online_learning_updates": 0,
+  "order_execution": false,
+  "project": "Orbix Signal Lab",
+  "status": "ok",
+  "storage_engine": "DuckDB",
+  "storage_path": "/tmp/orbix-preview/candles.duckdb"
+}

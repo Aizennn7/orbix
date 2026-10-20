@@ -85,6 +85,20 @@ For CI, `.github/workflows/deploy-azure.yml` runs the test suite on every push t
 
 Until both exist the deploy job is skipped with a notice, so the workflow never fails a push for missing configuration. Tests still run.
 
+### GitHub Pages (static snapshot only)
+
+GitHub Pages serves static files and cannot run Python, so it **cannot host the live app**. What it can host is a read-only snapshot: the real dashboard UI plus JSON captured from a real run.
+
+```bash
+# with the app running locally on :8000
+python scripts/build_static_demo.py --base-url http://127.0.0.1:8000
+# then commit docs/ and enable Pages -> deploy from branch, folder /docs
+```
+
+The build copies the real `app.js` and `styles.css`, injects `window.ORBIX_STATIC`, and writes one JSON file per endpoint into `docs/api-data/`. In that mode `api()` reads the captured files and refuses every write with an explicit message. A banner states the capture time and the data source, so a snapshot is never mistaken for a live feed. `docs/snapshot.json` records the same metadata.
+
+Regenerate the snapshot whenever you want it to reflect newer data; it does not update itself.
+
 ### Any other host
 
 `startup.sh` is deliberately portable and honours `$PORT`:

@@ -1,0 +1,108 @@
+{
+  "active_version": null,
+  "by_strategy": [],
+  "calibrated": false,
+  "calibration_report": null,
+  "calibration_samples": 0,
+  "dataset": {
+    "accuracy": null,
+    "accuracy_ci95": null,
+    "correct": 0,
+    "enabled": true,
+    "last_cursor": null,
+    "last_entry_time": null,
+    "latest_entry": "2026-10-20T08:57:00Z",
+    "learned": 0,
+    "note": "One test-before-learn update per completed bar, whether or not a signal was delivered. These are not paper trades and are excluded from win rate and Telegram.",
+    "resolved": 0,
+    "scored": 0,
+    "total": 0
+  },
+  "dataset_id": "0da1e25a50f831bbc39ddc1775f3c02f8d505800310d76ae58eda703e4fffe18",
+  "drift": {
+    "state": "untracked"
+  },
+  "ensemble_members": 0,
+  "feature_count": 26,
+  "feature_version": 2,
+  "learning_counts": null,
+  "learning_events": [],
+  "model_ready": true,
+  "note": "Trained on synthetic demo candles for interface testing only. This model never learns from outcomes and its probabilities are not market evidence.",
+  "pair": "EUR/USD",
+  "prediction": {
+    "abstain_reason": null,
+    "calibrated": false,
+    "calibration_flat": false,
+    "contributions": [
+      {
+        "contribution": 0.1644,
+        "feature": "hour_cos",
+        "label": "Hour of day (cos)",
+        "value": -3.2874,
+        "weight": -0.05
+      },
+      {
+        "contribution": 0.1215,
+        "feature": "rsi_slope",
+        "label": "RSI slope",
+        "value": 2.4304,
+        "weight": 0.05
+      },
+      {
+        "contribution": 0.0939,
+        "feature": "range_position_20",
+        "label": "Position in 20-bar range",
+        "value": 1.8786,
+        "weight": 0.05
+      },
+      {
+        "contribution": 0.0887,
+        "feature": "range_pct",
+        "label": "Candle range",
+        "value": 1.7743,
+        "weight": 0.05
+      },
+      {
+        "contribution": 0.0881,
+        "feature": "body_atr_ratio",
+        "label": "Body vs ATR",
+        "value": 1.7614,
+        "weight": 0.05
+      },
+      {
+        "contribution": 0.0876,
+        "feature": "ema_slope",
+        "label": "EMA gap slope",
+        "value": 1.7511,
+        "weight": 0.05
+      }
+    ],
+    "ensemble_members": 0,
+    "probability_up": 0.7357971030578221,
+    "raw_probability": 0.7357971030578221,
+    "uncertainty": null
+  },
+  "prequential": null,
+  "reliability": [],
+  "reliability_note": "Recent resolved outcomes scored by the current champion. Descriptive, not a forecast; small buckets are noisy.",
+  "reliability_samples": 0,
+  "shadow": {
+    "accuracy": null,
+    "accuracy_ci95": null,
+    "learned": 0,
+    "losses": 0,
+    "note": "Counterfactual raw reads recorded while the flat-calibration gate blocked live signals. They feed the model and calibration only; they are not paper trades or delivery candidates.",
+    "pending": 0,
+    "resolved": 0,
+    "ties": 0,
+    "total": 0,
+    "wins": 0
+  },
+  "source": "SYNTHETIC DEMO",
+  "trained_at": null,
+  "training_samples": 693,
+  "uncertainty_limit": 0.1,
+  "validation_log_loss": 0.7440501365129302,
+  "versions": []
+}

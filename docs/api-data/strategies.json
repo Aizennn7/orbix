@@ -1,0 +1,228 @@
+{
+  "candidates": [
+    {
+      "category": "trend",
+      "name": "EMA crossover trend",
+      "number": 1,
+      "status": "research"
+    },
+    {
+      "category": "trend",
+      "name": "5-8-13 SMA ribbon",
+      "number": 2,
+      "status": "research"
+    },
+    {
+      "category": "trend",
+      "name": "Higher-timeframe trend + M1 entry",
+      "number": 3,
+      "status": "research"
+    },
+    {
+      "category": "trend",
+      "name": "Moving-average pullback",
+      "number": 4,
+      "status": "research"
+    },
+    {
+      "category": "trend",
+      "name": "Trend-filtered RSI pullback",
+      "number": 5,
+      "status": "prototype approximation"
+    },
+    {
+      "category": "trend",
+      "name": "Ichimoku Cloud",
+      "number": 6,
+      "status": "research"
+    },
+    {
+      "category": "momentum",
+      "name": "RSI 50-line continuation",
+      "number": 7,
+      "status": "research"
+    },
+    {
+      "category": "momentum",
+      "name": "RSI 30/70 turn",
+      "number": 8,
+      "status": "research"
+    },
+    {
+      "category": "momentum",
+      "name": "RSI divergence",
+      "number": 9,
+      "status": "research"
+    },
+    {
+      "category": "momentum",
+      "name": "Stochastic turn",
+      "number": 10,
+      "status": "research"
+    },
+    {
+      "category": "momentum",
+      "name": "MACD crossover",
+      "number": 11,
+      "status": "research"
+    },
+    {
+      "category": "momentum",
+      "name": "MACD + RSI confirmation",
+      "number": 12,
+      "status": "research"
+    },
+    {
+      "category": "breakout",
+      "name": "Bollinger squeeze breakout",
+      "number": 13,
+      "status": "research"
+    },
+    {
+      "category": "breakout",
+      "name": "Bollinger-band breakout",
+      "number": 14,
+      "status": "research"
+    },
+    {
+      "category": "breakout",
+      "name": "Keltner-channel breakout",
+      "number": 15,
+      "status": "research"
+    },
+    {
+      "category": "breakout",
+      "name": "ATR volatility breakout",
+      "number": 16,
+      "status": "research"
+    },
+    {
+      "category": "breakout",
+      "name": "Opening-range breakout",
+      "number": 17,
+      "status": "research"
+    },
+    {
+      "category": "breakout",
+      "name": "Breakout and retest",
+      "number": 18,
+      "status": "research"
+    },
+    {
+      "category": "range",
+      "name": "Support bounce",
+      "number": 19,
+      "status": "research"
+    },
+    {
+      "category": "range",
+      "name": "Resistance rejection",
+      "number": 20,
+      "status": "research"
+    },
+    {
+      "category": "range",
+      "name": "Range-bound trading",
+      "number": 21,
+      "status": "research"
+    },
+    {
+      "category": "range",
+      "name": "Bollinger bounce",
+      "number": 22,
+      "status": "prototype approximation"
+    },
+    {
+      "category": "range",
+      "name": "RSI + support/resistance reversal",
+      "number": 23,
+      "status": "research"
+    },
+    {
+      "category": "range",
+      "name": "Stochastic + support/resistance",
+      "number": 24,
+      "status": "research"
+    },
+    {
+      "category": "pattern",
+      "name": "Inside-bar breakout",
+      "number": 25,
+      "status": "research"
+    },
+    {
+      "category": "pattern",
+      "name": "Bull-flag continuation",
+      "number": 26,
+      "status": "research"
+    },
+    {
+      "category": "pattern",
+      "name": "Bear-flag continuation",
+      "number": 27,
+      "status": "research"
+    },
+    {
+      "category": "pattern",
+      "name": "Triangle breakout",
+      "number": 28,
+      "status": "research"
+    },
+    {
+      "category": "pattern",
+      "name": "Head-and-shoulders break",
+      "number": 29,
+      "status": "research"
+    },
+    {
+      "category": "scalping",
+      "name": "RSI/MACD momentum scalping",
+      "number": 30,
+      "status": "research"
+    }
+  ],
+  "executable": [
+    {
+      "category": "regime-aware trend continuation",
+      "description": "Original 6-check rule set: EMA regime, multi-bar momentum, RSI band, directional ADX, candle quality, and prior-range breakout. Requires 5 checks; a prequential model vetoes disagreement when trained. Abstains in extreme volatility.",
+      "id": "orbix_confluence",
+      "name": "Orbix Confluence Gate",
+      "prototype": true
+    },
+    {
+      "category": "machine learning",
+      "description": "Only signals when the model estimate and EMA direction agree.",
+      "id": "ml_consensus",
+      "name": "Orbix ML + trend agreement",
+      "prototype": true
+    },
+    {
+      "category": "high-frequency model read",
+      "description": "Higher-frequency mode for collecting a signal roughly every three minutes: the calibrated model's direction, a small minimum edge, EMA trend context, and the same uncertainty and flat-calibration vetoes. This is deliberately less selective than the 5/6 gate; frequency is not accuracy.",
+      "id": "orbix_cadence",
+      "name": "Orbix Cadence Read",
+      "prototype": true
+    },
+    {
+      "category": "trend",
+      "description": "EMA direction, RSI range, and candle direction must agree.",
+      "id": "trend_pullback",
+      "name": "Trend pullback",
+      "prototype": true
+    },
+    {
+      "category": "range",
+      "description": "Bollinger-band stretch plus an RSI turn.",
+      "id": "range_reversal",
+      "name": "Range reversal",
+      "prototype": true
+    },
+    {
+      "category": "breakout",
+      "description": "A close beyond the previous 20-candle high or low.",
+      "id": "breakout",
+      "name": "20-candle breakout",
+      "prototype": true
+    }
+  ]
+}

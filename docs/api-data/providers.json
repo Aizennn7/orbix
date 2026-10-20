@@ -1,0 +1,66 @@
+{
+  "fields": {
+    "finnhub_api_key": {
+      "configured": false,
+      "masked": null,
+      "source": null
+    },
+    "telegram_bot_token": {
+      "configured": false,
+      "masked": null,
+      "source": null
+    },
+    "telegram_chat_id": {
+      "configured": false,
+      "masked": null,
+      "source": null
+    },
+    "twelve_data_api_key": {
+      "configured": false,
+      "masked": null,
+      "source": null
+    }
+  },
+  "note": "Keys are stored in a server-local file readable only by the server user (mode 600). The file is not encrypted at rest, is never returned in full, and is masked when read back. Server environment variables take precedence over saved keys.",
+  "providers": {
+    "calendar": {
+      "accessible": null,
+      "checked_at": null,
+      "configured": false,
+      "detail": {
+        "event_count": 0,
+        "last_error": null,
+        "last_updated": null
+      },
+      "label": "Finnhub",
+      "live": false,
+      "masked": null,
+      "message": "No calendar key saved.",
+      "source": null
+    },
+    "market": {
+      "accessible": null,
+      "checked_at": null,
+      "configured": false,
+      "label": "Twelve Data",
+      "live": false,
+      "masked": null,
+      "message": "No market key saved.",
+      "source": null
+    },
+    "telegram": {
+      "accessible": null,
+      "auto_post": false,
+      "checked_at": null,
+      "configured": false,
+      "label": "Telegram",
+      "live": false,
+      "masked": null,
+      "message": "Bot token and chat id are both required.",
+      "source": null,
+      "target_chat": null
+    }
+  },
+  "stored": false,
+  "updated_at": null
+}
