@@ -19,7 +19,7 @@ from .brokers import pocket_option_ticket
 from .domain import Candle, format_datetime, parse_datetime
 from .market_data import parse_candles_csv, validate_candles
 from .runtime import Runtime
-from .security import dashboard_credentials
+from .security import auth_configured
 from .strategies import EXECUTABLE_STRATEGIES
 from .telegram import TelegramError, TelegramNotifier
 
@@ -1673,7 +1673,7 @@ class AutomationService:
             f"Configured for {telegram.get('target_chat')}." if telegram["configured"]
             else "Optional channel delivery is not configured.",
         )
-        auth_enabled = dashboard_credentials() is not None
+        auth_enabled = auth_configured()
         check(
             "dashboard_auth",
             "Dashboard authentication",

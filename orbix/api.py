@@ -3,15 +3,31 @@ from __future__ import annotations
 import asyncio
 from concurrent.futures import ThreadPoolExecutor, wait
 from contextlib import asynccontextmanager
+from html import escape as html_escape
+import hmac
+import os
 from pathlib import Path
 import tempfile
 from typing import Callable
+from urllib.parse import parse_qs, quote
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from .auth import (
+    CSRF_HEADER,
+    SESSION_COOKIE,
+    SESSION_MAX_AGE,
+    clear_login_failures,
+    create_session,
+    load_session_secret,
+    login_attempt_allowed,
+    record_login_failure,
+    safe_next,
+    verify_session,
+)
 from .automation import AutomationService, ProviderError
 from .backtest import run_walk_forward_backtest
 from .brokers import capabilities as broker_capabilities
@@ -21,7 +37,7 @@ from .env import load_env
 from .future import build_future_plan
 from .provider_config import ProviderConfigStore
 from .runtime import BACKTEST_WINDOW, Runtime
-from .security import basic_auth_allowed, dashboard_credentials
+from .security import auth_configured, basic_auth_allowed, dashboard_user, verify_password
 from .strategies import strategy_catalog_payload
 from .telegram import TelegramError
 
@@ -41,6 +57,7 @@ runtime = Runtime()
 automation = AutomationService(runtime)
 provider_config = ProviderConfigStore(runtime.data_dir)
 automation.apply_provider_config(provider_config.effective())
+SESSION_SECRET = load_session_secret(runtime.data_dir) if auth_configured() else None
 
 
 @asynccontextmanager
@@ -61,21 +78,138 @@ app = FastAPI(
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
 
 
+PUBLIC_PATHS = {"/login", "/api/auth/status", "/favicon.ico"}
+
+
+def _cookie_secure(request: Request) -> bool:
+    configured = os.getenv("ORBIX_COOKIE_SECURE", "").strip().lower()
+    if configured in {"1", "true", "yes", "on"}:
+        return True
+    if configured in {"0", "false", "no", "off"}:
+        return False
+    forwarded = request.headers.get("x-forwarded-proto", "").split(",")[0].strip().lower()
+    return request.url.scheme == "https" or forwarded == "https"
+
+
+def _session_payload(request: Request) -> dict | None:
+    return verify_session(request.cookies.get(SESSION_COOKIE), SESSION_SECRET)
+
+
+def _login_page(next_url: str = "/", error: str = "") -> str:
+    template = (WEB_DIR / "login.html").read_text(encoding="utf-8")
+    error_html = f'<p class="login-error" role="alert">{html_escape(error)}</p>' if error else ""
+    return template.replace("{{error}}", error_html).replace("{{next}}", html_escape(next_url))
+
+
+def _login_response(next_url: str = "/", error: str = "", status_code: int = 200) -> HTMLResponse:
+    return HTMLResponse(_login_page(next_url, error), status_code=status_code, headers={"Cache-Control": "no-store"})
+
+
 @app.middleware("http")
 async def dashboard_auth(request: Request, call_next):
-    """Optional HTTP Basic auth for every page and API route.
+    """Session login (with HTTP Basic fallback) for pages and API routes.
 
-    Disabled unless ORBIX_DASHBOARD_PASSWORD is set, so local installs keep
-    working unchanged. Use it behind HTTPS whenever the dashboard is reachable
-    from another machine.
+    Authentication is opt-in through ORBIX_DASHBOARD_PASSWORD or
+    ORBIX_DASHBOARD_PASSWORD_HASH. Static assets and the login page stay public;
+    every other page redirects to /login and every API route returns 401 until
+    the browser has a valid signed session.
     """
-    if not basic_auth_allowed(request.headers.get("authorization")):
-        return Response(
-            status_code=401,
-            content="Authentication required.",
-            headers={"WWW-Authenticate": 'Basic realm="Orbix Signal Lab", charset="UTF-8"'},
-        )
+    if not auth_configured():
+        return await call_next(request)
+    path = request.url.path
+    if path.startswith("/static/") or path in PUBLIC_PATHS:
+        return await call_next(request)
+    session = _session_payload(request)
+    basic_ok = basic_auth_allowed(request.headers.get("authorization"))
+    if not session and not basic_ok:
+        if path.startswith("/api/") or "application/json" in request.headers.get("accept", ""):
+            return JSONResponse({"detail": "Authentication required."}, status_code=401)
+        target = request.url.path
+        if request.url.query:
+            target = f"{target}?{request.url.query}"
+        return RedirectResponse(f"/login?next={quote(target, safe='')}", status_code=303)
+    if session and not basic_ok and request.method not in {"GET", "HEAD", "OPTIONS"}:
+        supplied = request.headers.get(CSRF_HEADER, "").encode("utf-8")
+        expected = str(session.get("csrf", "")).encode("utf-8")
+        if not hmac.compare_digest(supplied, expected):
+            return JSONResponse({"detail": "CSRF token missing or invalid."}, status_code=403)
+    request.state.user = (session or {}).get("u") or dashboard_user()
     return await call_next(request)
+
+
+@app.get("/login", response_class=HTMLResponse)
+def login_form(request: Request, next: str = ""):
+    if not auth_configured():
+        return RedirectResponse("/", status_code=303)
+    target = safe_next(next)
+    if _session_payload(request):
+        return RedirectResponse(target, status_code=303)
+    return _login_response(target)
+
+
+@app.post("/login")
+async def login_submit(request: Request) -> Response:
+    if not auth_configured():
+        return RedirectResponse("/", status_code=303)
+    body = await request.body()
+    if len(body) > 4096:
+        return _login_response("/", "Login request is too large.", 413)
+    form = parse_qs(body.decode("utf-8", "replace"))
+    username = (form.get("username") or [""])[0].strip()
+    password = (form.get("password") or [""])[0]
+    next_url = safe_next((form.get("next") or ["/"])[0])
+    client_ip = request.client.host if request.client else "unknown"
+    if not login_attempt_allowed(client_ip):
+        return _login_response(next_url, "Too many attempts. Wait a few minutes and try again.", 429)
+    if hmac.compare_digest(username.encode("utf-8"), dashboard_user().encode("utf-8")) and verify_password(password):
+        clear_login_failures(client_ip)
+        secret = SESSION_SECRET or load_session_secret(runtime.data_dir)
+        token, _ = create_session(dashboard_user(), secret)
+        response = RedirectResponse(next_url, status_code=303)
+        response.set_cookie(
+            SESSION_COOKIE,
+            token,
+            max_age=SESSION_MAX_AGE,
+            httponly=True,
+            samesite="lax",
+            secure=_cookie_secure(request),
+            path="/",
+        )
+        return response
+    record_login_failure(client_ip)
+    return _login_response(next_url, "Wrong username or password.", 401)
+
+
+@app.post("/logout")
+def logout(request: Request) -> Response:
+    wants_json = "application/json" in request.headers.get("accept", "")
+    response = JSONResponse({"status": "signed_out"}) if wants_json else RedirectResponse("/login", status_code=303)
+    response.delete_cookie(SESSION_COOKIE, path="/")
+    return response
+
+
+@app.get("/api/auth/status")
+def auth_status(request: Request) -> dict:
+    if not auth_configured():
+        return {"auth_enabled": False, "authenticated": True, "user": None, "csrf": None}
+    session = _session_payload(request)
+    if session:
+        return {
+            "auth_enabled": True,
+            "authenticated": True,
+            "user": session.get("u"),
+            "csrf": session.get("csrf"),
+            "via": "session",
+        }
+    if basic_auth_allowed(request.headers.get("authorization")):
+        return {
+            "auth_enabled": True,
+            "authenticated": True,
+            "user": dashboard_user(),
+            "csrf": None,
+            "via": "basic",
+        }
+    return {"auth_enabled": True, "authenticated": False, "user": None, "csrf": None}
 
 
 class SignalRequest(BaseModel):
@@ -182,7 +316,7 @@ def health() -> dict:
             "automatic_signals_active": automation_state["automatic_signals_active"],
             "clock": automation_state.get("clock"),
             "env_file_loaded": ENV_FILE is not None,
-            "dashboard_auth_enabled": dashboard_credentials() is not None,
+            "dashboard_auth_enabled": auth_configured(),
         }
 
 

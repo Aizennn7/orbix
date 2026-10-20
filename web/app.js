@@ -10,14 +10,51 @@ const ROUTES = {
   telegram: "Telegram channel",
   trader: "Trader discipline",
 };
-const state = { market: null, strategies: null, lastSignal: null, route: "dashboard", botClock: null, brokerTicket: null, providers: null, providersBusy: false, providerClearArmed: false, providerClearTimer: null, lastBacktestKey: null, backtestTimer: null, backtestRunning: false, automation: null, lastAutoSignalId: null, lastAutoCandleTimestamp: null, notificationsEnabled: false, toastTimer: null, telegram: null, telegramBusy: false, future: null, futureBusy: false, abstentions: null, modelSource: null, trader: null };
+const state = { market: null, strategies: null, lastSignal: null, route: "dashboard", botClock: null, brokerTicket: null, providers: null, providersBusy: false, providerClearArmed: false, providerClearTimer: null, lastBacktestKey: null, backtestTimer: null, backtestRunning: false, automation: null, lastAutoSignalId: null, lastAutoCandleTimestamp: null, notificationsEnabled: false, toastTimer: null, telegram: null, telegramBusy: false, future: null, futureBusy: false, abstentions: null, modelSource: null, trader: null, authEnabled: false, csrf: null };
 const $ = (selector) => document.querySelector(selector);
 
 async function api(path, options = {}) {
+  const method = String(options.method || "GET").toUpperCase();
+  const requestsWrite = !["GET", "HEAD", "OPTIONS"].includes(method);
+  if (state.csrf && requestsWrite && !(options.headers || {})["X-Orbix-CSRF"]) {
+    options = { ...options, headers: { ...(options.headers || {}), "X-Orbix-CSRF": state.csrf } };
+  }
   const response = await fetch(path, options);
   const payload = await response.json().catch(() => ({}));
+  if (response.status === 401 && state.authEnabled && !path.startsWith("/api/auth/")) {
+    const next = `${window.location.pathname}${window.location.hash}`;
+    window.location.assign(`/login?next=${encodeURIComponent(next)}`);
+  }
   if (!response.ok) throw new Error(payload.detail || `Request failed (${response.status})`);
   return payload;
+}
+
+async function initAuth() {
+  let info = null;
+  try {
+    info = await api("/api/auth/status");
+  } catch (error) {
+    return;
+  }
+  state.authEnabled = Boolean(info.auth_enabled);
+  state.csrf = info.csrf || null;
+  const button = $("#signOutButton");
+  if (!button) return;
+  if (!state.authEnabled || !info.csrf) {
+    button.hidden = true;
+    return;
+  }
+  button.hidden = false;
+  button.textContent = `SIGN OUT · ${String(info.user || "").toUpperCase()}`;
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    try {
+      await api("/logout", { method: "POST", headers: { Accept: "application/json" } });
+    } catch (error) {
+      // The cookie may already be gone; still leave the dashboard.
+    }
+    window.location.assign("/login");
+  });
 }
 
 function formatPrice(value, pair = "EUR/USD") {
@@ -2330,6 +2367,7 @@ function wireEvents() {
 
 async function start() {
   wireEvents();
+  await initAuth();
   updateNotificationButton();
   initializeBlackholeAnimation();
   let route = window.location.hash.slice(1);
