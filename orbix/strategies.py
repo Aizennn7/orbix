@@ -99,9 +99,18 @@ def decide(
     probability_up: float | None,
     buy_threshold: float = 0.57,
     sell_threshold: float = 0.43,
+    probability_calibrated: bool | None = None,
+    uncertainty: float | None = None,
+    max_uncertainty: float = 0.10,
 ) -> Decision:
     if features is None:
         return Decision("NO SIGNAL", "Not enough completed candles to calculate indicators.", probability_up)
+    if uncertainty is not None and uncertainty > max_uncertainty:
+        return Decision(
+            "NO SIGNAL",
+            f"Ensemble disagreement is {uncertainty:.3f}, wider than the {max_uncertainty:.2f} stability limit; abstaining instead of guessing.",
+            probability_up,
+        )
 
     ema_fast = features["ema_fast"]
     ema_slow = features["ema_slow"]
@@ -152,16 +161,22 @@ def decide(
         )
         if score >= 5 and checks["trend"][side] and checks["directional ADX"][side] and model_agrees:
             aligned = ", ".join(name for name, criteria in checks.items() if criteria[side])
-            learned_guard = "; prequential model agrees" if probability_up is not None else "; model not ready, six-rule gate only"
+            if probability_up is None:
+                learned_guard = "; model not ready, six-rule gate only"
+            elif probability_calibrated:
+                learned_guard = f"; calibrated model read {probability_up:.2f} agrees"
+            else:
+                learned_guard = f"; raw model read {probability_up:.2f} agrees (not yet calibrated)"
             return Decision(
                 side,
                 f"Orbix Confluence Gate {score}/6: {aligned}{learned_guard}. Rule score is not a calibrated probability.",
                 probability_up,
             )
         if score >= 5 and not model_agrees:
+            label = "calibrated" if probability_calibrated else "raw"
             return Decision(
                 "NO SIGNAL",
-                f"Orbix Confluence Gate abstains: {side.lower()} rules passed {score}/6, but the prequential model vetoed disagreement. Model score is uncalibrated.",
+                f"Orbix Confluence Gate abstains: {side.lower()} rules passed {score}/6, but the prequential model vetoed disagreement ({label} model read {probability_up:.2f}).",
                 probability_up,
             )
         return Decision(
@@ -173,10 +188,19 @@ def decide(
     if strategy_id == "ml_consensus":
         if probability_up is None:
             return Decision("NO SIGNAL", "The model is not ready; wait for more data.", None)
+        basis = "calibrated" if probability_calibrated else "raw"
         if probability_up >= buy_threshold and ema_fast > ema_slow and features["return_1"] > 0:
-            return Decision("BUY", "Model leans up and the short-term EMA trend agrees.", probability_up)
+            return Decision(
+                "BUY",
+                f"Model leans up ({basis} probability {probability_up:.2f}) and the short-term EMA trend agrees.",
+                probability_up,
+            )
         if probability_up <= sell_threshold and ema_fast < ema_slow and features["return_1"] < 0:
-            return Decision("SELL", "Model leans down and the short-term EMA trend agrees.", probability_up)
+            return Decision(
+                "SELL",
+                f"Model leans down ({basis} probability {probability_up:.2f}) and the short-term EMA trend agrees.",
+                probability_up,
+            )
         return Decision("NO SIGNAL", "Model and trend filters do not agree strongly enough.", probability_up)
 
     if strategy_id == "trend_pullback":

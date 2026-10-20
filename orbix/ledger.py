@@ -51,6 +51,10 @@ class PaperLedger:
                 connection.execute("ALTER TABLE signals ADD COLUMN dataset_id TEXT NOT NULL DEFAULT ''")
             if "entry_time" not in columns:
                 connection.execute("ALTER TABLE signals ADD COLUMN entry_time TEXT NOT NULL DEFAULT ''")
+            if "probability_raw" not in columns:
+                connection.execute("ALTER TABLE signals ADD COLUMN probability_raw REAL")
+            if "uncertainty" not in columns:
+                connection.execute("ALTER TABLE signals ADD COLUMN uncertainty REAL")
             connection.execute(
                 """CREATE TABLE IF NOT EXISTS abstentions (
                     abstention_id TEXT PRIMARY KEY,
@@ -90,8 +94,9 @@ class PaperLedger:
             connection.execute(
                 """INSERT OR IGNORE INTO signals
                 (signal_id, pair, strategy, side, entry_price, generated_at, entry_time, expires_at,
-                 probability_up, source, reason, features_json, dataset_id, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                 probability_up, source, reason, features_json, dataset_id, created_at,
+                 probability_raw, uncertainty)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     signal.signal_id,
                     signal.pair,
@@ -107,6 +112,8 @@ class PaperLedger:
                     json.dumps(features or {}),
                     dataset_id,
                     datetime.now(timezone.utc).isoformat(),
+                    getattr(signal, "probability_raw", None),
+                    getattr(signal, "uncertainty", None),
                 ),
             )
 
@@ -398,6 +405,78 @@ class PaperLedger:
             "prequential_accuracy_ci95": wilson_interval(correct, evaluated),
             "last_update": row[3],
         }
+
+    def learning_history(self, limit: int = 600) -> list[dict]:
+        """Resolved predictions in chronological order, for tracker hydration."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                """SELECT probability_up, label, correct, model_updated, created_at FROM learning_events
+                   WHERE probability_up IS NOT NULL AND label IN (0, 1)
+                   ORDER BY created_at DESC LIMIT ?""",
+                (max(1, int(limit)),),
+            ).fetchall()
+        return [dict(row) for row in reversed(rows)]
+
+    def learning_replay(self, limit: int = 200) -> list[dict]:
+        """Stored feature rows and labels for guarded replay checks."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                """SELECT le.label, le.probability_up, s.features_json
+                   FROM learning_events le JOIN signals s ON s.signal_id = le.signal_id
+                   WHERE le.label IN (0, 1) AND s.features_json NOT IN ('', '{}')
+                   ORDER BY le.created_at DESC LIMIT ?""",
+                (max(1, int(limit)),),
+            ).fetchall()
+        result = []
+        for row in reversed(rows):
+            item = dict(row)
+            try:
+                item["features"] = json.loads(item.pop("features_json"))
+            except (TypeError, ValueError):
+                continue
+            if item["features"]:
+                result.append(item)
+        return result
+
+    def learning_by_strategy(self, dataset_id: str | None = None) -> list[dict]:
+        """Per-strategy prediction record, joined through the stored signal."""
+        signal_filter = " WHERE s.dataset_id = ?" if dataset_id else ""
+        outcome_filter = " WHERE dataset_id = ? AND status = 'RESOLVED'" if dataset_id else " WHERE status = 'RESOLVED'"
+        parameters = (dataset_id,) if dataset_id else ()
+        with self._connect() as connection:
+            learning_rows = connection.execute(
+                f"""SELECT s.strategy AS strategy, COUNT(*) AS resolved,
+                          COALESCE(SUM(CASE WHEN le.correct IS NOT NULL THEN 1 ELSE 0 END), 0) AS evaluated,
+                          COALESCE(SUM(CASE WHEN le.correct = 1 THEN 1 ELSE 0 END), 0) AS correct,
+                          COALESCE(SUM(le.model_updated), 0) AS updates,
+                          AVG(CASE WHEN le.correct IS NOT NULL THEN le.probability_up END) AS mean_probability
+                   FROM learning_events le JOIN signals s ON s.signal_id = le.signal_id{signal_filter}
+                   GROUP BY s.strategy""",
+                parameters,
+            ).fetchall()
+            outcome_rows = connection.execute(
+                f"""SELECT strategy, COUNT(*) AS resolved,
+                          COALESCE(SUM(CASE WHEN outcome = 'WIN' THEN 1 ELSE 0 END), 0) AS wins,
+                          COALESCE(SUM(CASE WHEN outcome = 'LOSS' THEN 1 ELSE 0 END), 0) AS losses,
+                          COALESCE(SUM(CASE WHEN outcome = 'TIE' THEN 1 ELSE 0 END), 0) AS ties
+                   FROM signals{outcome_filter} GROUP BY strategy""",
+                parameters,
+            ).fetchall()
+        outcomes = {row["strategy"]: dict(row) for row in outcome_rows}
+        result = []
+        for row in learning_rows:
+            item = dict(row)
+            item["evaluated"] = int(item["evaluated"])
+            item["correct"] = int(item["correct"])
+            item["accuracy"] = (item["correct"] / item["evaluated"]) if item["evaluated"] else None
+            item["accuracy_ci95"] = wilson_interval(item["correct"], item["evaluated"])
+            for key, value in outcomes.get(item["strategy"], {}).items():
+                if key == "strategy":
+                    continue
+                item["outcome_resolved" if key == "resolved" else key] = value
+            result.append(item)
+        result.sort(key=lambda item: (-item["evaluated"], item["strategy"]))
+        return result
 
     def resolve(self, signal_id: str, exit_price: float) -> dict:
         if exit_price <= 0:

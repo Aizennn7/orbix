@@ -40,7 +40,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Orbix Signal Lab",
     description="A signal-only research and paper-testing dashboard. No broker orders are sent.",
-    version="0.3.1",
+    version="0.4.0",
     lifespan=lifespan,
 )
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
@@ -158,6 +158,36 @@ def abstentions(days: int = 7, limit: int = 25) -> dict:
 def learning_status() -> dict:
     with runtime.lock:
         return runtime.learning_summary()
+
+
+@app.get("/api/model")
+def model_status(pair: str = "EUR/USD") -> dict:
+    try:
+        with runtime.lock:
+            return runtime.model_card(pair)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/model/retrain")
+def model_retrain(pair: str = "EUR/USD") -> dict:
+    try:
+        return runtime.retrain_model(pair)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/model/rollback")
+def model_rollback(pair: str = "EUR/USD") -> dict:
+    try:
+        return runtime.rollback_model(pair)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/model/maintenance")
+def model_maintenance() -> dict:
+    return runtime.learning_maintenance()
 
 
 @app.get("/api/automation/status")

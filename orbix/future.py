@@ -86,7 +86,7 @@ def _replay(runtime, count: int) -> list[dict[str, Any]]:
     candles = runtime.candles
     if len(candles) < 40:
         return []
-    model = runtime.models.get(runtime.pair)
+    model = runtime.champion_model(runtime.pair)
     model = model if model is not None and getattr(model, "trained", False) else None
     start = max(40, len(candles) - max(1, min(count, MAX_REPLAY_BARS)))
     rows: list[dict[str, Any]] = []
@@ -108,6 +108,7 @@ def _replay(runtime, count: int) -> list[dict[str, Any]]:
             "side": signal.side,
             "direction": {"BUY": "CALL", "SELL": "PUT"}.get(signal.side, "—"),
             "probability_up": signal.probability_up,
+            "probability_calibrated": signal.probability_calibrated,
             "reason": signal.reason,
             "source": runtime.source,
             "replayed": True,
@@ -208,7 +209,7 @@ def build_future_plan(runtime, automation, count: int = 6, now: datetime | None 
         "evidence": evidence,
         "alternatives": alternatives,
         "disclaimer": (
-            "Research and paper testing only. Signals can lose. The six-check gate is not a calibrated probability, "
-            "and the replay rows are historical re-runs, not predictions."
+            "Research and paper testing only. Signals can lose. The six-check rule score is not a probability; "
+            "when a model read is shown it is calibrated only on resolved outcomes. Replay rows are historical re-runs, not predictions."
         ),
     }

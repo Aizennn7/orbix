@@ -91,12 +91,20 @@ class OrbixEngineTests(unittest.TestCase):
         self.assertEqual(result["accuracy_target"], 0.95)
         self.assertEqual(result["target_window"], 20)
         self.assertIn("last_20_decisive", result)
+        self.assertEqual(result["uncertainty_gate"]["evaluated"], 0)
+        self.assertFalse(result["uncertainty_gate"]["enabled"])
         if result["decisive_trades"]:
             self.assertLessEqual(result["win_rate_ci95"]["lower"], result["win_rate"])
             self.assertLessEqual(result["win_rate"], result["win_rate_ci95"]["upper"])
         confluence = run_walk_forward_backtest(self.candles, strategy_id="orbix_confluence", payout=0.8)
         self.assertEqual(confluence["strategy"], "orbix_confluence")
         self.assertGreater(confluence["test_candles"], 0)
+        gate = confluence["uncertainty_gate"]
+        self.assertTrue(gate["enabled"])
+        self.assertGreater(gate["evaluated"], 0)
+        self.assertLessEqual(gate["blocked_signals"], gate["abstentions"])
+        self.assertLessEqual(gate["abstentions"], gate["evaluated"])
+        self.assertGreaterEqual(gate["blocked_signals"], 0)
 
     def test_orbix_confluence_requires_five_of_six_checks_and_trend_adx(self) -> None:
         candle = self.candles[-1]

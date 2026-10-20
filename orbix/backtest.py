@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+from .calibration import (
+    IsotonicCalibrator,
+    brier_score,
+    expected_calibration_error,
+    fit_validated,
+    log_loss,
+)
 from .domain import Candle
 from .features import compute_features
 from .metrics import wilson_interval
-from .model import OnlineLogisticModel, train_from_candles
+from .model import BootstrapEnsemble, OnlineLogisticModel, build_training_samples
 from .strategies import decide, EXECUTABLE_STRATEGIES
 
 
@@ -18,6 +25,9 @@ def run_walk_forward_backtest(
     payout: float = 0.80,
     threshold: float = 0.57,
     retrain_every: int = 60,
+    use_calibration: bool = True,
+    include_uncertainty: bool = True,
+    max_uncertainty: float = 0.10,
 ) -> dict:
     """Chronological dry-run test; model sees only outcomes that have matured."""
     if len(candles) < 120:
@@ -36,13 +46,26 @@ def run_walk_forward_backtest(
     rows = compute_features(candles)
     test_start = max(60, int(len(candles) * 0.60))
     model: OnlineLogisticModel | None = None
+    ensemble: BootstrapEnsemble | None = None
     uses_learned_model = strategy_id in {"ml_consensus", "orbix_confluence"}
     if uses_learned_model:
-        model = train_from_candles(candles, rows, horizon=horizon, end_index=test_start - 1)
+        training = build_training_samples(candles, rows, horizon=horizon, end_index=test_start - 1)
+        model = OnlineLogisticModel().fit(training)
+        if include_uncertainty and len(training) >= 60:
+            ensemble = BootstrapEnsemble.fit(training)
 
     wins = losses = ties = 0
+    uncertainty_abstentions = 0
+    uncertainty_blocked = 0
+    ensemble_bars = 0
     net_units = 0.0
     trades: list[dict] = []
+    predictions: list[dict] = []
+    issued_raw: dict[int, float] = {}
+    calibration_points: list[tuple[float, int]] = []
+    calibrator = IsotonicCalibrator()
+    calibration_validation: dict | None = None
+    calibration_fitted_at = 0
     last_retrained = test_start
     for index in range(test_start, len(candles) - horizon):
         # Online test-then-learn: update only with a label whose expiry has passed.
@@ -52,29 +75,76 @@ def run_walk_forward_backtest(
                 matured_entry = candles[matured_index].close
                 matured_exit = candles[matured_index + horizon].close
                 if matured_exit != matured_entry:
-                    model.learn_one(rows[matured_index], int(matured_exit > matured_entry))
+                    matured_label = int(matured_exit > matured_entry)
+                    model.learn_one(rows[matured_index], matured_label)
+                    if use_calibration and matured_index in issued_raw:
+                        calibration_points.append((issued_raw[matured_index], matured_label))
             if index - last_retrained >= retrain_every:
-                model = train_from_candles(candles, rows, horizon=horizon, end_index=index)
+                training = build_training_samples(candles, rows, horizon=horizon, end_index=index)
+                model = OnlineLogisticModel().fit(training)
+                ensemble = BootstrapEnsemble.fit(training) if include_uncertainty and len(training) >= 60 else None
                 last_retrained = index
+            # Refit only from outcomes that had matured before this decision.
+            if use_calibration and len(calibration_points) >= 60:
+                bucket = len(calibration_points) // 20
+                if bucket != calibration_fitted_at:
+                    fitted, validation = fit_validated(calibration_points)
+                    if validation.get("accepted") and fitted.fitted:
+                        calibrator = fitted
+                    calibration_validation = validation
+                    calibration_fitted_at = bucket
 
         feature = rows[index]
         if feature is None:
             continue
-        probability = model.predict_up(feature) if model is not None and model.trained else None
+        raw_probability = model.predict_up(feature) if model is not None and model.trained else None
+        if raw_probability is not None:
+            issued_raw[index] = raw_probability
+        probability = calibrator.transform(raw_probability) if (raw_probability is not None and calibrator.fitted) else raw_probability
+        exit_price = candles[index + horizon].close
+        entry = candles[index].close
+        if raw_probability is not None and exit_price != entry:
+            predictions.append({
+                "raw": raw_probability,
+                "calibrated": probability,
+                "label": int(exit_price > entry),
+                "calibrator_active": calibrator.fitted,
+            })
+        spread = None
+        if uses_learned_model and ensemble is not None and ensemble.ready:
+            _, spread = ensemble.predict(feature)
+        if spread is not None:
+            ensemble_bars += 1
+        decision_options = {
+            "buy_threshold": threshold,
+            "sell_threshold": 1.0 - threshold,
+            "uncertainty": spread,
+            "max_uncertainty": max_uncertainty,
+        }
         decision = decide(
             strategy_id,
             candles[index],
             candles[index - 1].close,
             feature,
             probability,
-            buy_threshold=threshold,
-            sell_threshold=1.0 - threshold,
+            **decision_options,
         )
         if decision.side == "NO SIGNAL":
+            if spread is not None and spread > max_uncertainty:
+                uncertainty_abstentions += 1
+                # The gate runs first, so re-evaluate without it to report how
+                # many would-be signals the spread actually removed.
+                decision_options["uncertainty"] = None
+                if decide(
+                    strategy_id,
+                    candles[index],
+                    candles[index - 1].close,
+                    feature,
+                    probability,
+                    **decision_options,
+                ).side != "NO SIGNAL":
+                    uncertainty_blocked += 1
             continue
-
-        entry = candles[index].close
-        exit_price = candles[index + horizon].close
         if exit_price == entry:
             result = "TIE"
             ties += 1
@@ -93,6 +163,8 @@ def run_walk_forward_backtest(
             "exit": exit_price,
             "result": result,
             "probability_up": probability,
+            "probability_raw": raw_probability,
+            "calibrated": calibrator.fitted,
         })
 
     signal_count = wins + losses + ties
@@ -119,6 +191,30 @@ def run_walk_forward_backtest(
         max_drawdown = max(max_drawdown, peak - equity)
 
     last_20_count = len(last_20)
+    paired = [item for item in predictions if item["calibrator_active"]]
+    raw_points = [(item["raw"], item["label"]) for item in paired]
+    calibrated_points = [(item["calibrated"], item["label"]) for item in paired]
+    raw_brier = brier_score(raw_points)
+    calibrated_brier = brier_score(calibrated_points)
+    calibration_report = {
+        "method": "isotonic (PAVA), prequential",
+        "fitted": calibrator.fitted,
+        "fitted_on_outcomes": calibrator.samples,
+        "calibration_points_available": len(calibration_points),
+        "scored_predictions": len(predictions),
+        "raw_brier": raw_brier,
+        "calibrated_brier": calibrated_brier,
+        "raw_ece": expected_calibration_error(raw_points),
+        "calibrated_ece": expected_calibration_error(calibrated_points),
+        "raw_log_loss": log_loss(raw_points),
+        "calibrated_log_loss": log_loss(calibrated_points),
+        "last_validation": calibration_validation,
+        "note": (
+            "The calibrator at each step used only outcomes that had already matured. "
+            "Raw and calibrated metrics use the same later rows, once a calibrator existed; "
+            "earlier steps were uncalibrated and help only the trade statistics."
+        ),
+    }
     return {
         "strategy": strategy_id,
         "candles": len(candles),
@@ -139,6 +235,16 @@ def run_walk_forward_backtest(
         "break_even_win_rate": break_even,
         "horizon_candles": horizon,
         "threshold": threshold,
+        "probability": "calibrated when available" if use_calibration else "raw",
+        "calibration": calibration_report,
+        "uncertainty_gate": {
+            "enabled": bool(uses_learned_model and include_uncertainty),
+            "limit": max_uncertainty,
+            "evaluated": ensemble_bars,
+            "abstentions": uncertainty_abstentions,
+            "blocked_signals": uncertainty_blocked,
+            "abstention_rate": round(uncertainty_abstentions / ensemble_bars, 4) if ensemble_bars else 0.0,
+        },
         "accuracy_target": TARGET_WIN_RATE,
         "target_window": TARGET_WINDOW,
         "last_20_decisive": {

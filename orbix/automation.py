@@ -659,10 +659,11 @@ class AutomationService:
         side = str(signal.get("side", "NO SIGNAL"))
         source = str(signal.get("source") or "UNKNOWN")
         probability = signal.get("probability_up")
-        probability_text = (
-            f"{float(probability) * 100:.1f}% up (model estimate, not calibrated)"
-            if probability is not None else "not available (rule gate only)"
-        )
+        if probability is not None:
+            basis = "calibrated on resolved outcomes" if signal.get("probability_calibrated") else "raw model estimate, not calibrated"
+            probability_text = f"{float(probability) * 100:.1f}% up ({basis})"
+        else:
+            probability_text = "not available (rule gate only)"
         entry = self._telegram_time(signal.get("entry_time") or signal.get("generated_at"))
         expiry = self._telegram_time(signal.get("prediction_time") or signal.get("expires_at"))
         horizon = signal.get("horizon") or 1
@@ -1099,6 +1100,9 @@ class AutomationService:
     async def _run(self) -> None:
         next_market = 0.0 if self.market_provider.configured else float("inf")
         next_calendar = 0.0 if self.calendar.configured else float("inf")
+        # Calibration refit and drift-triggered retraining are checked on a slow
+        # schedule; both are no-ops unless real imported outcomes exist.
+        next_learning = time.monotonic() + 900.0
         while True:
             now = time.monotonic()
             if self.calendar.configured and now >= next_calendar:
@@ -1113,7 +1117,15 @@ class AutomationService:
                 except Exception:
                     pass
                 next_market = time.monotonic() + self._next_market_delay()
-            deadlines = [deadline for deadline in (next_market, next_calendar) if deadline != float("inf")]
+            if now >= next_learning:
+                try:
+                    await asyncio.to_thread(self.runtime.learning_maintenance)
+                except Exception:
+                    pass
+                next_learning = time.monotonic() + 900.0
+            deadlines = [
+                deadline for deadline in (next_market, next_calendar, next_learning) if deadline != float("inf")
+            ]
             if not deadlines:
                 await asyncio.sleep(30)
             else:

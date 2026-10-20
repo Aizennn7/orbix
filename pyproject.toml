@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "orbix-signal-lab"
-version = "0.3.1"
+version = "0.4.0"
 description = "Signal research and paper-testing dashboard for one-minute FX candles"
 requires-python = ">=3.11"
 dependencies = [
@@ -12,6 +12,7 @@ dependencies = [
   "uvicorn[standard]>=0.34,<1.0",
   "duckdb>=1.4,<2.0",
   "python-dotenv>=1.0,<2.0",
+  "numpy>=1.26,<3",
 ]
 
 [tool.setuptools.packages.find]

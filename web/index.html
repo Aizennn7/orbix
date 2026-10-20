@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#050505">
   <title>Dashboard — Orbix Signal Lab</title>
-  <link rel="stylesheet" href="/static/styles.css?v=12">
+  <link rel="stylesheet" href="/static/styles.css?v=13">
 </head>
 <body>
   <div class="noise" aria-hidden="true"></div>
@@ -174,7 +174,7 @@
             <div id="upcomingEvents" class="upcoming-events"></div>
           </div>
           <button class="button button-primary generate-button" id="generateButton"><span>GENERATE SIGNAL</span><span class="button-arrow">↗</span></button>
-          <p class="micro-copy">The Orbix Confluence Gate is a strict rule set, not a sureshot. Model scores are uncalibrated. News events trigger abstention, not a guessed direction.</p>
+          <p class="micro-copy">The Orbix Confluence Gate is a strict rule set, not a sureshot. Model probabilities are calibrated only after enough resolved outcomes exist, and calibration describes the past. News events trigger abstention, not a guessed direction.</p>
         </article>
         <aside class="panel engine-notes">
           <div class="eyebrow small-eyebrow">HOW TO READ IT</div><h2>Signal, not autopilot.</h2>
@@ -185,6 +185,39 @@
           <a class="text-button inline-link" href="#dashboard" data-route="dashboard">CHANGE PAIR ON DASHBOARD ↗</a>
         </aside>
       </div>
+      <article class="panel model-lab-panel" aria-labelledby="modelLabTitle">
+        <div class="panel-heading">
+          <div><div class="eyebrow small-eyebrow">PREDICTION + SELF-LEARNING</div><h2 id="modelLabTitle">Model calibration &amp; drift</h2></div>
+          <span class="mode-tag" id="modelVersionTag">NO VERSION</span>
+        </div>
+        <div class="future-evidence-grid model-grid">
+          <div class="result-stat"><span>FEATURE SET</span><strong id="modelFeatureVersion">—</strong></div>
+          <div class="result-stat"><span>PRODUCTION READ</span><strong id="modelProbability">—</strong></div>
+          <div class="result-stat"><span>RAW SCORE</span><strong id="modelRawProbability">—</strong></div>
+          <div class="result-stat"><span>CALIBRATION</span><strong id="modelCalibrationState">—</strong></div>
+          <div class="result-stat"><span>ENSEMBLE SPREAD</span><strong id="modelUncertainty">—</strong></div>
+          <div class="result-stat"><span>DRIFT STATE</span><strong id="modelDriftState">—</strong></div>
+        </div>
+        <div class="model-columns">
+          <div>
+            <span class="abstention-heading">TOP CONTRIBUTIONS · LATEST BAR</span>
+            <div class="contribution-list" id="modelContributions"><p class="dataset-empty">Train a model to see its drivers.</p></div>
+          </div>
+          <div>
+            <span class="abstention-heading">MODEL SNAPSHOTS</span>
+            <div class="model-version-list" id="modelVersions"><p class="dataset-empty">No validated version yet.</p></div>
+            <span class="abstention-heading">PER-STRATEGY RECORD</span>
+            <div class="model-strategy-list" id="modelStrategies"><p class="dataset-empty">No resolved imported outcomes yet.</p></div>
+          </div>
+        </div>
+        <div class="model-actions">
+          <button class="button button-secondary" id="refreshModel" type="button">REFRESH</button>
+          <button class="button button-secondary" id="retrainModel" type="button">RETRAIN + VALIDATE</button>
+          <button class="button button-secondary" id="rollbackModel" type="button">ROLL BACK ONE VERSION</button>
+          <span id="modelActionStatus" class="model-action-status"></span>
+        </div>
+        <p class="micro-copy" id="modelLabNote">A held-out validation gate decides whether a retrained model replaces the champion. Calibration is refitted only from resolved imported-data outcomes; demo outcomes never train it.</p>
+      </article>
     </section>
 
     <section class="page-view" id="page-backtest" data-page="backtest" aria-labelledby="backtest-title" hidden>
@@ -452,6 +485,6 @@
     <p>Signal research only. Live feeds are optional/configured on the server. No Quotex login or real trades.</p>
     <span class="footer-right">BUILT FOR BETTER QUESTIONS</span>
   </footer>
-  <script src="/static/app.js?v=12" defer></script>
+  <script src="/static/app.js?v=13" defer></script>
 </body>
 </html>

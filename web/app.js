@@ -9,7 +9,7 @@ const ROUTES = {
   future: "Future",
   telegram: "Telegram channel",
 };
-const state = { market: null, strategies: null, lastSignal: null, route: "dashboard", providerKeys: [""], providerConfig: null, lastBacktestKey: null, backtestTimer: null, backtestRunning: false, automation: null, lastAutoSignalId: null, lastAutoCandleTimestamp: null, notificationsEnabled: false, toastTimer: null, telegram: null, telegramBusy: false, future: null, futureBusy: false, abstentions: null };
+const state = { market: null, strategies: null, lastSignal: null, route: "dashboard", providerKeys: [""], providerConfig: null, lastBacktestKey: null, backtestTimer: null, backtestRunning: false, automation: null, lastAutoSignalId: null, lastAutoCandleTimestamp: null, notificationsEnabled: false, toastTimer: null, telegram: null, telegramBusy: false, future: null, futureBusy: false, abstentions: null, modelSource: null };
 const $ = (selector) => document.querySelector(selector);
 
 async function api(path, options = {}) {
@@ -367,9 +367,15 @@ function renderSignal(signal) {
   $("#entryTime").textContent = compactTime(entryTime);
   $("#generatedTime").textContent = compactTime(generatedAt);
   $("#expiryTime").textContent = `${compactTime(predictionTime)} · ${signalLeadLabel(generatedAt, predictionTime)}`;
+  const probabilityText = signal.probability_up == null
+    ? null
+    : `${(signal.probability_up * 100).toFixed(1)}% up${signal.probability_calibrated ? " · calibrated" : " · raw"}`;
   $("#modelScore").textContent = signal.strategy === "orbix_confluence"
-    ? (ruleMatch ? `${ruleMatch[1]}/6 checks` : "rule-based")
-    : signal.probability_up == null ? "—" : `${(signal.probability_up * 100).toFixed(1)}% up`;
+    ? [ruleMatch ? `${ruleMatch[1]}/6 checks` : "rule-based", probabilityText].filter(Boolean).join(" · ")
+    : probabilityText || "—";
+  $("#modelScore").title = (signal.contributions || []).slice(0, 3)
+    .map((item) => `${item.label} ${item.contribution > 0 ? "+" : ""}${Number(item.contribution).toFixed(3)}`)
+    .join(" · ");
   $("#signalGlyph").textContent = glyph;
   $("#signalResult").dataset.side = side.toLowerCase().replaceAll(" ", "-");
   $("#signalSide").title = signal.signal_id || "";
@@ -402,6 +408,7 @@ async function generateSignal() {
       }),
     });
     renderSignal(signal);
+    void loadModelCard();
   } catch (error) {
     $("#signalSide").textContent = "ENGINE ERROR";
     $("#signalReason").textContent = error.message;
@@ -463,7 +470,15 @@ async function runBacktest(force = true) {
     const rateText = report.win_rate == null
       ? "No decisive signals in the test window."
       : `${report.wins}/${report.decisive_trades} decisive wins; 95% Wilson interval ${ci}.`;
-    $("#backtestNote").textContent = `${report.data_source || "Current data"} · ${report.test_candles} later candles tested · ${rateText} ${targetStatus} Coverage ${(report.signal_coverage * 100).toFixed(1)}%; net ${report.net_units.toFixed(2)} units; max drawdown ${report.max_drawdown_units.toFixed(2)} units. ${report.note}`;
+    const calibration = report.calibration || {};
+    const calibrationText = calibration.fitted
+      ? ` Probability source: ${report.probability}. On the same ${Number(calibration.calibration_points_available || 0).toLocaleString()} later predictions: ECE ${(Number(calibration.raw_ece) * 100).toFixed(1)}% raw → ${(Number(calibration.calibrated_ece) * 100).toFixed(1)}% calibrated; Brier ${Number(calibration.raw_brier).toFixed(4)} → ${Number(calibration.calibrated_brier).toFixed(4)}. Lower is better for both; calibration improves reliability, not necessarily sharpness. Last fit validated on ${Number(calibration.last_validation?.validated_on || 0).toLocaleString()} already-matured outcomes.`
+      : " Not enough matured outcomes in this window to fit a calibrator; probabilities stayed raw.";
+    const gate = report.uncertainty_gate || {};
+    const gateText = gate.enabled && gate.evaluated
+      ? ` Uncertainty gate: ${Number(gate.blocked_signals || 0).toLocaleString()} would-be signals removed out of ${Number(gate.evaluated).toLocaleString()} model bars (limit ${(Number(gate.limit) * 100).toFixed(1)} pp).`
+      : "";
+    $("#backtestNote").textContent = `${report.data_source || "Current data"} · ${report.test_candles} later candles tested · ${rateText} ${targetStatus} Coverage ${(report.signal_coverage * 100).toFixed(1)}%; net ${report.net_units.toFixed(2)} units; max drawdown ${report.max_drawdown_units.toFixed(2)} units.${calibrationText}${gateText} ${report.note}`;
     state.lastBacktestKey = key;
   } catch (error) {
     $("#backtestNote").textContent = error.message;
@@ -810,6 +825,7 @@ function setActivePage(route, shouldScroll = true) {
   }
   if (route === "future") void loadFuturePlan();
   if (route === "telegram") void refreshTelegramPage();
+  if (route === "engine") void loadModelCard();
 }
 
 function handleRouteChange() {
@@ -1428,8 +1444,181 @@ async function loadFuturePlan() {
   }
 }
 
+function percentProbability(value) {
+  return value == null ? "—" : `${(Number(value) * 100).toFixed(1)}% up`;
+}
+
+function describeDrift(drift) {
+  const state = String(drift?.state || "untracked").toUpperCase();
+  if (drift?.change == null) return state;
+  const change = Number(drift.change);
+  return `${state} · ${change > 0 ? "+" : ""}${(change * 100).toFixed(1)} pp`;
+}
+
+function renderModelCard(data) {
+  const prediction = data.prediction || {};
+  state.modelSource = data.source;
+  const canTrain = data.source === "IMPORTED CSV";
+  ["#retrainModel", "#rollbackModel"].forEach((selector) => {
+    const button = $(selector);
+    if (!button) return;
+    button.disabled = !canTrain;
+    button.title = canTrain ? "" : "Import completed candle history before training or rolling back a model.";
+  });
+  const activeVersion = data.active_version;
+  $("#modelVersionTag").textContent = activeVersion
+    ? `${activeVersion} RESTORE POINT`
+    : data.source === "IMPORTED CSV" ? "UNVERSIONED" : "DEMO / UNVERSIONED";
+  $("#modelVersionTag").title = activeVersion
+    ? "Latest validated snapshot used for rollback. Guarded online updates after this snapshot live in the champion file."
+    : "A validated snapshot is created when a challenger passes held-out validation.";
+  $("#modelFeatureVersion").textContent = `v${data.feature_version ?? "—"} · ${data.feature_count ?? "—"} inputs`;
+  $("#modelProbability").textContent = percentProbability(prediction.probability_up);
+  $("#modelRawProbability").textContent = percentProbability(prediction.raw_probability);
+  const calibrationReport = data.calibration_report || {};
+  $("#modelCalibrationState").textContent = data.calibrated
+    ? `ISOTONIC · ${Number(data.calibration_samples || 0).toLocaleString()} PTS${calibrationReport.ece_after == null ? "" : ` · ECE ${(Number(calibrationReport.ece_after) * 100).toFixed(1)}%`}`
+    : calibrationReport.reason ? "RAW · FIT NOT ACCEPTED" : "RAW · NEEDS 60 OUTCOMES";
+  $("#modelCalibrationState").title = calibrationReport.validated_on
+    ? `Held-out validation on ${calibrationReport.validated_on} newer outcomes. ECE ${(Number(calibrationReport.ece_before) * 100).toFixed(1)}% → ${(Number(calibrationReport.ece_after) * 100).toFixed(1)}%.`
+    : calibrationReport.reason || "Calibration is fitted from resolved outcomes once at least 60 exist.";
+  $("#modelUncertainty").textContent = prediction.uncertainty == null
+    ? "NO ENSEMBLE"
+    : `±${(Number(prediction.uncertainty) * 100).toFixed(1)} pp · ${Number(data.ensemble_members || 0)} MEMBERS`;
+  $("#modelDriftState").textContent = describeDrift(data.drift);
+
+  const contributions = $("#modelContributions");
+  contributions.replaceChildren();
+  if (!prediction.contributions?.length) {
+    const empty = document.createElement("p");
+    empty.className = "dataset-empty";
+    empty.textContent = data.model_ready ? "No feature contributions were returned." : (data.reason || "Train a model to see its drivers.");
+    contributions.append(empty);
+  } else {
+    const peak = Math.max(...prediction.contributions.map((item) => Math.abs(Number(item.contribution) || 0)), 1e-6);
+    prediction.contributions.forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "contribution-row";
+      const name = document.createElement("span");
+      name.className = "contribution-name";
+      name.textContent = item.label || item.feature;
+      const bar = document.createElement("i");
+      bar.className = "contribution-bar";
+      bar.dataset.direction = Number(item.contribution) >= 0 ? "up" : "down";
+      bar.style.width = `${Math.max(4, (Math.abs(Number(item.contribution)) / peak) * 100).toFixed(1)}%`;
+      const value = document.createElement("strong");
+      value.textContent = `${Number(item.contribution) > 0 ? "+" : ""}${Number(item.contribution).toFixed(3)}`;
+      row.append(name, bar, value);
+      contributions.append(row);
+    });
+  }
+
+  const versions = $("#modelVersions");
+  versions.replaceChildren();
+  if (!data.versions?.length) {
+    const empty = document.createElement("p");
+    empty.className = "dataset-empty";
+    empty.textContent = data.source === "IMPORTED CSV"
+      ? "No validated snapshot yet. Retraining promotes one only if it wins on held-out candles."
+      : "Demo data is never versioned or learned from.";
+    versions.append(empty);
+  } else {
+    data.versions.forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "model-version-row";
+      if (item.active) row.dataset.active = "true";
+      const label = document.createElement("strong");
+      label.textContent = `${item.version}${item.active ? " · RESTORE POINT" : ""}`;
+      const detail = document.createElement("span");
+      const brier = item.metrics?.challenger?.brier;
+      detail.textContent = `${item.reason} · ${Number(item.training_samples || 0).toLocaleString()} samples${brier == null ? "" : ` · Brier ${Number(brier).toFixed(4)}`}`;
+      row.append(label, detail);
+      versions.append(row);
+    });
+  }
+
+  const strategies = $("#modelStrategies");
+  strategies.replaceChildren();
+  if (!data.by_strategy?.length) {
+    const empty = document.createElement("p");
+    empty.className = "dataset-empty";
+    empty.textContent = "No resolved imported outcomes yet.";
+    strategies.append(empty);
+  } else {
+    data.by_strategy.forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "model-strategy-row";
+      const label = document.createElement("strong");
+      label.textContent = item.strategy;
+      const detail = document.createElement("span");
+      detail.textContent = item.evaluated
+        ? `${item.correct}/${item.evaluated} correct before update${item.wins == null ? "" : ` · ${item.wins}W/${item.losses}L/${item.ties}T`}`
+        : `${Number(item.resolved || 0)} resolved · no scored prediction`;
+      row.append(label, detail);
+      strategies.append(row);
+    });
+  }
+
+  const prequential = data.prequential;
+  const recordText = prequential?.samples
+    ? ` Prequential record: ${Number(prequential.correct).toLocaleString()}/${Number(prequential.samples).toLocaleString()} correct (${(Number(prequential.accuracy) * 100).toFixed(1)}%, 95% Wilson ${(Number(prequential.accuracy_ci95.lower) * 100).toFixed(1)}–${(Number(prequential.accuracy_ci95.upper) * 100).toFixed(1)}%); Brier ${Number(prequential.brier).toFixed(3)}; majority-class baseline ${(Number(prequential.majority_baseline_accuracy) * 100).toFixed(1)}%.`
+    : " No resolved imported predictions yet, so there is no accuracy record to show.";
+  $("#modelLabNote").textContent = (data.note || "Probabilities describe recorded evidence, not future certainty.") + recordText;
+}
+
+async function loadModelCard() {
+  const status = $("#modelActionStatus");
+  try {
+    const pair = $("#pairSelect")?.value || state.market?.pair || "EUR/USD";
+    const data = await api(`/api/model?pair=${encodeURIComponent(pair)}`);
+    renderModelCard(data);
+    if (status && !status.dataset.busy) status.textContent = "";
+  } catch (error) {
+    if (status) status.textContent = `Model status unavailable: ${error.message}`;
+  }
+}
+
+async function runModelAction(path, confirmation, busyLabel) {
+  const status = $("#modelActionStatus");
+  const buttons = ["#retrainModel", "#rollbackModel", "#refreshModel"].map((selector) => $(selector));
+  if (confirmation && !window.confirm(confirmation)) return;
+  buttons.forEach((button) => { if (button) button.disabled = true; });
+  if (status) {
+    status.dataset.busy = "true";
+    status.textContent = busyLabel;
+  }
+  try {
+    const result = await api(path, { method: "POST" });
+    if (status) status.textContent = `${result.status || "done"} — ${result.reason || result.note || ""}`;
+    await loadModelCard();
+    if (status) status.textContent = `${result.status || "done"} — ${result.reason || result.note || ""}`;
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  } finally {
+    if (status) delete status.dataset.busy;
+    buttons.forEach((button) => { if (button) button.disabled = false; });
+    if (state.modelSource !== "IMPORTED CSV") {
+      ["#retrainModel", "#rollbackModel"].forEach((selector) => {
+        const button = $(selector);
+        if (button) button.disabled = true;
+      });
+    }
+  }
+}
+
 function wireEvents() {
   $("#generateButton").addEventListener("click", generateSignal);
+  $("#refreshModel").addEventListener("click", loadModelCard);
+  $("#retrainModel").addEventListener("click", () => runModelAction(
+    `/api/model/retrain?pair=${encodeURIComponent($("#pairSelect").value || "EUR/USD")}`,
+    "Retrain a challenger and replace the champion only if it wins on held-out candles?",
+    "Fitting challenger and validating…",
+  ));
+  $("#rollbackModel").addEventListener("click", () => runModelAction(
+    `/api/model/rollback?pair=${encodeURIComponent($("#pairSelect").value || "EUR/USD")}`,
+    "Restore the previous validated model snapshot?",
+    "Restoring the previous snapshot…",
+  ));
   $("#futureRefresh").addEventListener("click", loadFuturePlan);
   $("#telegramSendLatest").addEventListener("click", () => sendTelegramSignals("latest"));
   $("#telegramSendBatch").addEventListener("click", () => sendTelegramSignals("batch"));
@@ -1443,6 +1632,7 @@ function wireEvents() {
   $("#backtestButton").addEventListener("click", () => runBacktest(true));
   $("#pairSelect").addEventListener("change", async () => {
     await loadMarket();
+    void loadModelCard();
     scheduleAutomaticBacktest();
   });
   $("#strategySelect").addEventListener("change", () => scheduleAutomaticBacktest());

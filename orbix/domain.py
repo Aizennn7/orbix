@@ -104,6 +104,10 @@ class Signal:
     reason: str
     entry_time: datetime | None = None
     is_live: bool = False
+    probability_raw: float | None = None
+    probability_calibrated: bool = False
+    uncertainty: float | None = None
+    contributions: tuple[dict, ...] = ()
 
     @property
     def prediction_time(self) -> datetime:
@@ -124,7 +128,13 @@ class Signal:
             "prediction_time": format_datetime(self.prediction_time),
             "expires_at": format_datetime(self.expires_at),
             "horizon": max(1, int((self.expires_at - (self.entry_time or self.generated_at)).total_seconds() // 60)),
+            # probability_up is the production estimate: calibrated when a
+            # calibrator exists, otherwise the raw model score.
             "probability_up": self.probability_up,
+            "probability_raw": self.probability_raw,
+            "probability_calibrated": self.probability_calibrated,
+            "uncertainty": self.uncertainty,
+            "contributions": list(self.contributions),
             "source": self.source,
             "reason": self.reason,
             "is_live": self.is_live,
