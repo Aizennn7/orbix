@@ -169,6 +169,52 @@
     </a>
   </nav>
 
+  <!-- Settings Modal - Root Level Supabase Config -->
+  <div id="settingsModal" class="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;align-items:center;justify-content:center;padding:20px;">
+    <div style="background:#121212;border:1px solid rgba(255,255,255,.1);border-radius:16px;max-width:480px;width:100%;padding:24px;max-height:90vh;overflow:auto;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+        <h3 style="margin:0;font-size:18px;">Live & Online Config</h3>
+        <button id="closeSettings" style="background:none;border:none;color:white;font-size:24px;cursor:pointer;">×</button>
+      </div>
+      
+      <div style="background:rgba(100,150,255,.1);border:1px solid rgba(100,150,255,.2);border-radius:10px;padding:12px;margin-bottom:16px;">
+        <strong style="font-size:13px;color:#8ab4ff;">Database at Root Level</strong>
+        <div style="font-size:12px;color:rgba(255,255,255,.6);margin-top:4px;line-height:1.5;">
+          All config in <code>database/</code> + <code>data/</code> + <code>.env</code> at root.<br>
+          APK uses local SQLite offline, syncs to Supabase when live.
+        </div>
+      </div>
+
+      <div style="margin-bottom:16px;">
+        <div style="font-size:12px;color:rgba(255,255,255,.5);margin-bottom:6px;">STATUS</div>
+        <div id="liveStatus" style="font-size:13px;background:rgba(255,255,255,.05);padding:10px;border-radius:8px;">Checking root config...</div>
+      </div>
+
+      <div style="margin-bottom:12px;">
+        <label style="font-size:12px;color:rgba(255,255,255,.6);">SUPABASE URL (from root .env)</label>
+        <input id="supabaseUrlInput" type="text" placeholder="https://xxx.supabase.co" style="width:100%;padding:10px;margin-top:4px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);color:white;border-radius:8px;font-size:14px;">
+      </div>
+      <div style="margin-bottom:12px;">
+        <label style="font-size:12px;color:rgba(255,255,255,.6);">SUPABASE ANON KEY (from root .env)</label>
+        <input id="supabaseKeyInput" type="password" placeholder="eyJ..." style="width:100%;padding:10px;margin-top:4px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);color:white;border-radius:8px;font-size:14px;">
+      </div>
+      
+      <button id="saveLiveConfig" class="btn-primary" style="width:100%;margin-top:8px;padding:12px;border-radius:10px;">💾 SAVE & GO LIVE ONLINE</button>
+      
+      <div style="margin-top:16px;padding-top:16px;border-top:1px solid rgba(255,255,255,.08);">
+        <div style="font-size:11px;color:rgba(255,255,255,.4);line-height:1.6;">
+          <strong>How to make LIVE and ONLINE in Codespace:</strong><br>
+          1. Create project at supabase.com<br>
+          2. SQL Editor → run <code>database/schema.sql</code> from root<br>
+          3. Copy URL + anon key from Project Settings → API<br>
+          4. <code>cp .env.example .env</code> at root, paste keys, set <code>DATABASE_BACKEND=supabase</code><br>
+          5. <code>python scripts/setup_supabase.py --check</code><br>
+          6. Rebuild APK → now live online 24/7
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Import file input hidden -->
   <input type="file" id="hiddenFileInput" accept=".csv" hidden>
 

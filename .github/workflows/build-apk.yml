@@ -6,15 +6,19 @@ name: Build Orbix APK - All Orbix inside with database
 
 on:
   push:
-    branches: [main, arena/cba3a92e-orbix]
+    branches: [main, arena/cba3a92e-orbix, arena/6260349f-orbix]
     paths:
       - "mobile/**"
       - "web/**"
       - "orbix/mobile_db.py"
       - "orbix/mobile_api.py"
+      - "orbix/mobile_api.py"
+      - "orbix/api.py"
       - "orbix/database.py"
       - "database/**"
       - "electron/**"
+      - "scripts/**"
+      - ".devcontainer/**"
       - ".github/workflows/build-apk.yml"
   workflow_dispatch:
 
