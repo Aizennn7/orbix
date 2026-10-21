@@ -7,7 +7,13 @@ services:
     ports:
       - "8000:8000"
     environment:
+      # Database at root level - all config from root .env
       ORBIX_DATA_DIR: /data
+      DATABASE_BACKEND: ${DATABASE_BACKEND:-auto}
+      DATABASE_URL: ${DATABASE_URL:-}
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-}
+      SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_KEY:-}
     # Create the file first: cp .env.example .env, then fill in the login and
     # provider values. required:false keeps `docker compose up` working before
     # that copy exists (Compose v2.24+).
@@ -16,6 +22,10 @@ services:
         required: false
     volumes:
       - orbix-data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
     healthcheck:
       test:
         - CMD
@@ -27,5 +37,41 @@ services:
       start_period: 20s
       retries: 3
 
+  # Optional Postgres at root level - for local Supabase-like dev
+  # Enabled with: docker compose --profile db up -d
+  # Or: DATABASE_URL=postgres://orbix:orbix@postgres:5432/orbix docker compose up -d
+  postgres:
+    image: postgres:15-alpine
+    container_name: orbix-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-orbix}
+      POSTGRES_USER: ${POSTGRES_USER:-orbix}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-orbix}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./database/sqlite_schema.sql:/docker-entrypoint-initdb.d/02-notice.txt:ro
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-orbix} -d ${POSTGRES_DB:-orbix}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    profiles:
+      - db
+      - postgres
+      - supabase
+
+  # Optional: Supabase local dev (if you have supabase CLI)
+  # supabase:
+  #   image: supabase/supabase:latest
+  #   profiles:
+  #     - supabase
+
 volumes:
   orbix-data:
+    driver: local
+  postgres-data:
+    driver: local

@@ -1,0 +1,20 @@
+/* Orbix Core Styles - Shared between web and mobile */
+:root {
+  --bg: #050505;
+  --panel: rgba(255,255,255,.055);
+  --line: rgba(255,255,255,.13);
+  --line-bright: rgba(255,255,255,.28);
+  --ink: #f7f7f7;
+  --muted: rgba(255,255,255,.58);
+  --dim: rgba(255,255,255,.34);
+}
+
+/* Reuse main orbix styles for consistency */
+.panel, .card {
+  background: linear-gradient(145deg, rgba(18,18,18,.92), rgba(10,10,10,.88));
+}
+
+/* Ensure orbix brand consistent */
+.brand-mark {
+  background: radial-gradient(circle at 35% 30%, #2a2a2a, #000);
+}

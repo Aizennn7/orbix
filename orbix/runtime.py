@@ -54,19 +54,61 @@ def _safe_pair(pair: str) -> str:
 
 
 def _default_data_dir() -> Path:
+    """Root level data dir - single source of truth via database/ config"""
+    try:
+        # Use root-level database config - shared by web, mobile, laptop, APK
+        from database import get_database_config
+        cfg = get_database_config()
+        return cfg.data_dir
+    except Exception:
+        pass
     configured = os.environ.get("ORBIX_DATA_DIR", "").strip()
     return Path(configured).expanduser() if configured else DATA_DIR
 
 
 class Runtime:
-    """Application state with a durable candle archive and a bounded hot window."""
+    """Application state with a durable candle archive and a bounded hot window.
+    
+    Now uses root-level database/ factory - single source of truth for all DB
+    Shared by web, mobile, laptop, APK - configured at root level
+    """
 
     def __init__(self, data_dir: str | Path | None = None) -> None:
-        self.data_dir = Path(data_dir) if data_dir is not None else _default_data_dir()
-        self.model_dir = self.data_dir / "models"
-        self.lock = threading.RLock()
-        self.candle_store = CandleStore(self.data_dir / "candles.duckdb")
-        self.ledger = PaperLedger(self.data_dir / "orbix.sqlite3")
+        # Use root-level database config if no explicit data_dir - single source of truth
+        if data_dir is None:
+            try:
+                from database import get_database_config, get_candle_store, get_ledger
+                db_config = get_database_config()
+                self.data_dir = db_config.data_dir
+                self.model_dir = self.data_dir / "models"
+                self.lock = threading.RLock()
+                # Root level factory - auto-selects backend (DuckDB, SQLite, Postgres, Supabase)
+                self.candle_store = get_candle_store(db_config)
+                self.ledger = get_ledger(db_config)
+                self.db_config = db_config
+            except Exception as e:
+                print(f"[Runtime] Root DB config failed ({e}), fallback to legacy")
+                self.data_dir = _default_data_dir()
+                self.model_dir = self.data_dir / "models"
+                self.lock = threading.RLock()
+                self.candle_store = CandleStore(self.data_dir / "candles.duckdb")
+                self.ledger = PaperLedger(self.data_dir / "orbix.sqlite3")
+                self.db_config = None
+        else:
+            self.data_dir = Path(data_dir)
+            self.model_dir = self.data_dir / "models"
+            self.lock = threading.RLock()
+            try:
+                from database import get_database_config, get_candle_store, get_ledger
+                db_config = get_database_config()
+                db_config.data_dir = self.data_dir
+                self.candle_store = get_candle_store(db_config)
+                self.ledger = get_ledger(db_config)
+                self.db_config = db_config
+            except Exception:
+                self.candle_store = CandleStore(self.data_dir / "candles.duckdb")
+                self.ledger = PaperLedger(self.data_dir / "orbix.sqlite3")
+                self.db_config = None
         self.discipline = TraderDiscipline(self.ledger)
         self.engine = PredictionEngine()
         self.settings = engine_config_from_env(os.environ)

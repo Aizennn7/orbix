@@ -1,0 +1,72 @@
+plugins {
+    id 'com.android.application'
+    id 'com.chaquo.python'
+}
+
+android {
+    namespace 'com.orbix.signallab'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.orbix.signallab"
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName "0.4.0"
+
+        ndk {
+            abiFilters "arm64-v8a", "armeabi-v7a", "x86_64"
+        }
+
+        // Chaquopy - All Orbix Python inside APK
+        python {
+            version "3.11"
+            pip {
+                install "fastapi"
+                install "uvicorn"
+                install "numpy"
+                install "python-dotenv"
+                // DuckDB not available on Android, use SQLite for mobile
+                install "supabase" // For cloud sync
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+        debug {
+            debuggable true
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    // Bundle web assets
+    sourceSets {
+        main {
+            assets.srcDirs = ['src/main/assets', '../../dist', '../../../web']
+        }
+    }
+}
+
+dependencies {
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'com.google.android.material:material:1.11.0'
+    implementation 'androidx.webkit:webkit:1.8.0'
+    implementation 'androidx.work:work-runtime:2.9.0'
+}
+
+chaquopy {
+    // Include all orbix Python code inside APK
+    sourceSets {
+        main {
+            python.srcDirs = ["src/main/python", "../../../orbix"]
+        }
+    }
+}

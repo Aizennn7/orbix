@@ -1,0 +1,34 @@
+# Example override for root-level database config
+# Copy to docker-compose.override.yml and customize
+# This shows how database is configured at root level
+
+services:
+  orbix:
+    environment:
+      # Root level database config - single source of truth
+      DATABASE_BACKEND: ${DATABASE_BACKEND:-auto}
+      # For local Postgres at root
+      DATABASE_URL: ${DATABASE_URL:-postgres://orbix:orbix@postgres:5432/orbix}
+      # For Supabase cloud sync (APK syncs when online)
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-}
+      SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_KEY:-}
+      # Data dir at root
+      ORBIX_DATA_DIR: /data
+    volumes:
+      - orbix-data:/data
+      # Mount root database/ for schema
+      - ./database:/app/database:ro
+
+  # Optional: Postgres at root level for local dev
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: orbix
+      POSTGRES_USER: orbix
+      POSTGRES_PASSWORD: orbix
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    ports:
+      - "5432:5432"

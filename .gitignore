@@ -17,3 +17,9 @@ session_secret.tmp
 # Deployment artifacts
 release.zip
 app.zip
+node_modules/
+mobile/node_modules/
+electron/node_modules/
+mobile/dist/
+mobile/android/
+mobile/android-chaquopy/app/build/

@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#050505">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Orbix — Signal Lab Mobile</title>
+  <link rel="stylesheet" href="./css/mobile-app.css">
+  <link rel="stylesheet" href="./css/orbix-core.css">
+</head>
+<body class="mobile-app">
+  <div class="noise"></div>
+  
+  <!-- Topbar -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">◉</span>
+      <div class="brand-copy">
+        <strong>ORBIX</strong>
+        <small>SIGNAL LAB • MOBILE</small>
+      </div>
+    </div>
+    <div class="top-actions">
+      <span class="offline-badge" id="offlineBadge">● OFFLINE DB</span>
+      <button class="icon-btn" id="settingsBtn" aria-label="Settings">⚙️</button>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="app-main">
+    <!-- Dashboard -->
+    <section class="page is-active" id="page-dashboard">
+      <div class="hero-mini">
+        <div class="eyebrow">M1 FX RESEARCH • OFFLINE FIRST</div>
+        <h1>Read the moment.<br><span>Wait for signal.</span></h1>
+        <div class="stats-row" id="statsRow">
+          <div class="stat"><span>CANDLES</span><strong id="statCandles">—</strong></div>
+          <div class="stat"><span>SIGNALS</span><strong id="statSignals">—</strong></div>
+          <div class="stat"><span>WIN RATE</span><strong id="statWin">—</strong></div>
+        </div>
+      </div>
+
+      <div class="card signal-card" id="latestSignalCard">
+        <div class="card-head">
+          <span class="eyebrow">LATEST SIGNAL</span>
+          <span class="badge" id="signalBadge">NO SIGNAL</span>
+        </div>
+        <div class="signal-display" id="signalDisplay">
+          <div class="signal-side" id="signalSide">—</div>
+          <div class="signal-meta">
+            <div><span>PAIR</span><strong id="signalPair">EUR/USD</strong></div>
+            <div><span>PROB</span><strong id="signalProb">—</strong></div>
+            <div><span>TIME</span><strong id="signalTime">—</strong></div>
+          </div>
+        </div>
+        <div class="signal-reason" id="signalReason">Waiting for next M1 candle...</div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <span class="eyebrow">MARKET • LAST 20 CANDLES</span>
+          <button class="text-btn" id="refreshMarket">↻ REFRESH</button>
+        </div>
+        <canvas id="candleChart" height="120"></canvas>
+        <div class="table-wrap">
+          <table class="mini-table">
+            <thead><tr><th>TIME</th><th>O</th><th>H</th><th>L</th><th>C</th></tr></thead>
+            <tbody id="candleRows"><tr><td colspan="5">Loading local DB...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <span class="eyebrow">QUICK ACTIONS</span>
+        </div>
+        <div class="action-grid">
+          <button class="action-btn" data-action="generate">⚡ GENERATE SIGNAL</button>
+          <button class="action-btn" data-action="import">📁 IMPORT CSV</button>
+          <button class="action-btn" data-action="backtest">📊 BACKTEST</button>
+          <button class="action-btn" data-action="sync">☁️ SYNC TO CLOUD</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Engine -->
+    <section class="page" id="page-engine">
+      <div class="page-head">
+        <h2>Signal Engine</h2>
+        <p>5 strategies running offline on local SQLite DB</p>
+      </div>
+      <div class="strategy-list" id="strategyList">
+        <!-- Populated by JS -->
+      </div>
+      <div class="card">
+        <div class="card-head"><span class="eyebrow">ALL STRATEGIES SCAN</span></div>
+        <div id="scanResults">Tap SCAN to evaluate all 5 methods on last closed candle</div>
+        <button class="btn-primary" id="scanAllBtn" style="margin-top:12px;width:100%;">🔍 SCAN ALL STRATEGIES</button>
+      </div>
+    </section>
+
+    <!-- Paper Log -->
+    <section class="page" id="page-paper">
+      <div class="page-head">
+        <h2>Paper Log</h2>
+        <p>All signals stored locally in APK database</p>
+      </div>
+      <div class="table-wrap">
+        <table class="mini-table">
+          <thead><tr><th>TIME</th><th>SIDE</th><th>PRICE</th><th>RESULT</th></tr></thead>
+          <tbody id="paperRows"><tr><td colspan="4">No signals yet</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Data -->
+    <section class="page" id="page-data">
+      <div class="page-head">
+        <h2>Local Database</h2>
+        <p>SQLite inside APK — works 24/7 offline</p>
+      </div>
+      <div class="card">
+        <div class="card-head"><span class="eyebrow">DATASETS</span><span id="datasetCount">—</span></div>
+        <div id="datasetList">Loading...</div>
+      </div>
+      <div class="card">
+        <div class="card-head"><span class="eyebrow">IMPORT</span></div>
+        <input type="file" id="csvFile" accept=".csv" style="width:100%;margin:8px 0;">
+        <select id="pairSelect" style="width:100%;padding:10px;background:rgba(255,255,255,.05);border:1px solid var(--line);color:white;border-radius:6px;margin:8px 0;">
+          <option>EUR/USD</option><option>GBP/USD</option><option>USD/JPY</option><option>BTC/USD</option>
+        </select>
+        <button class="btn-primary" id="importBtn" style="width:100%;">IMPORT TO LOCAL DB</button>
+      </div>
+      <div class="card">
+        <div class="card-head"><span class="eyebrow">STORAGE</span></div>
+        <div id="storageInfo">Calculating...</div>
+        <button class="btn-secondary" id="clearDbBtn" style="width:100%;margin-top:12px;background:rgba(255,80,80,.1);border-color:rgba(255,80,80,.3);">🗑️ CLEAR LOCAL DB</button>
+      </div>
+    </section>
+
+    <!-- Trader -->
+    <section class="page" id="page-trader">
+      <div class="page-head">
+        <h2>Trader Journal</h2>
+        <p>Discipline & daily reviews — offline</p>
+      </div>
+      <div class="card" id="traderCard">Loading journal...</div>
+    </section>
+  </main>
+
+  <!-- Bottom Nav -->
+  <nav class="bottom-nav">
+    <a href="#dashboard" class="nav-item active" data-page="dashboard">
+      <span class="nav-icon">◉</span><span class="nav-label">Dash</span>
+    </a>
+    <a href="#engine" class="nav-item" data-page="engine">
+      <span class="nav-icon">⚡</span><span class="nav-label">Engine</span>
+    </a>
+    <a href="#paper" class="nav-item" data-page="paper">
+      <span class="nav-icon">📝</span><span class="nav-label">Paper</span>
+    </a>
+    <a href="#data" class="nav-item" data-page="data">
+      <span class="nav-icon">🗄️</span><span class="nav-label">Data</span>
+    </a>
+    <a href="#trader" class="nav-item" data-page="trader">
+      <span class="nav-icon">💼</span><span class="nav-label">Trader</span>
+    </a>
+  </nav>
+
+  <!-- Import file input hidden -->
+  <input type="file" id="hiddenFileInput" accept=".csv" hidden>
+
+  <script type="module" src="./js/app.js"></script>
+</body>
+</html>

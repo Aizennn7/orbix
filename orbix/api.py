@@ -414,7 +414,65 @@ def storage_status() -> dict:
     with runtime.lock:
         summary = runtime.storage_summary()
         summary["datasets"] = runtime.candle_store.list_datasets(limit=50)
+        # Add root-level database config
+        try:
+            from database import get_database_config, check_database_health
+            db_cfg = get_database_config()
+            summary["database_config"] = db_cfg.to_dict()
+            summary["database_health"] = check_database_health(db_cfg)
+        except Exception as e:
+            summary["database_config_error"] = str(e)
         return summary
+
+
+@app.get("/api/database/config")
+def database_config() -> dict:
+    """Root level database config - single source of truth"""
+    try:
+        from database import get_database_config
+        cfg = get_database_config()
+        return {
+            "status": "ok",
+            "config": cfg.to_dict(),
+            "root_level": True,
+            "location": "database/ at root",
+            "data_dir": str(cfg.data_dir),
+            "note": "All database config at root level, shared by web, mobile, laptop, APK"
+        }
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+@app.get("/api/database/health")
+def database_health() -> dict:
+    """Database health check - root level"""
+    try:
+        from database import get_database_config
+        from database.connection import check_database_health
+        cfg = get_database_config()
+        health = check_database_health(cfg)
+        return {"status": "ok", "health": health, "config": cfg.to_dict()}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+@app.get("/api/database/schema")
+def database_schema() -> dict:
+    """Get database schema info - root level"""
+    try:
+        from pathlib import Path
+        root = Path(__file__).resolve().parents[1]
+        sqlite_schema = (root / "database" / "sqlite_schema.sql").read_text()[:2000] if (root / "database" / "sqlite_schema.sql").exists() else "Not found"
+        pg_schema = (root / "database" / "schema.sql").read_text()[:2000] if (root / "database" / "schema.sql").exists() else "Not found"
+        return {
+            "status": "ok",
+            "sqlite_schema_preview": sqlite_schema,
+            "postgres_schema_preview": pg_schema,
+            "location": "database/ at root level",
+            "files": ["database/schema.sql", "database/sqlite_schema.sql"]
+        }
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
 
 
 @app.get("/api/abstentions")

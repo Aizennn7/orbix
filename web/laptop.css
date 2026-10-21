@@ -1,0 +1,161 @@
+/* Orbix Laptop/Desktop Enhancements - For larger screens & Electron */
+:root {
+  --laptop-sidebar-width: 280px;
+  --laptop-topbar-height: 82px;
+}
+
+/* Laptop layout - optional sidebar mode */
+@media (min-width: 1440px) {
+  .shell {
+    width: min(1600px, calc(100% - 96px));
+  }
+
+  .hero h1, .page-heading h1 {
+    font-size: 72px;
+  }
+
+  .engine-layout {
+    grid-template-columns: minmax(0, 1.5fr) minmax(320px, .6fr);
+    gap: 20px;
+  }
+}
+
+/* Electron / Desktop app tweaks */
+.is-electron .topbar {
+  -webkit-app-region: drag;
+  padding-left: 80px; /* Space for window controls on macOS */
+}
+
+.is-electron .topbar a,
+.is-electron .topbar button {
+  -webkit-app-region: no-drag;
+}
+
+.is-electron .topbar::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 28px;
+  -webkit-app-region: drag;
+}
+
+/* Laptop keyboard shortcuts hint */
+.keyboard-shortcuts {
+  display: none;
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 40;
+  padding: 12px 16px;
+  background: rgba(18,18,18,.95);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font-size: 9px;
+  color: var(--muted);
+  backdrop-filter: blur(16px);
+}
+
+@media (min-width: 901px) {
+  .keyboard-shortcuts {
+    display: block;
+  }
+
+  .keyboard-shortcuts kbd {
+    display: inline-block;
+    padding: 2px 6px;
+    background: rgba(255,255,255,.08);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 8px;
+    margin: 0 2px;
+  }
+}
+
+/* Multi-column for large screens */
+@media (min-width: 1200px) {
+  .dashboard-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+
+  .dashboard-grid .panel-full {
+    grid-column: 1 / -1;
+  }
+}
+
+/* Hover states only for laptop (not touch) */
+@media (hover: hover) and (pointer: fine) {
+  .panel:hover {
+    border-color: var(--line-bright);
+    transform: translateY(-1px);
+    transition: all .2s ease;
+  }
+
+  .button-primary:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 20px rgba(255,255,255,.15);
+  }
+}
+
+/* Laptop specific - data tables */
+@media (min-width: 901px) {
+  .table-wrap {
+    border-radius: var(--radius);
+    border: 1px solid var(--line);
+    overflow: hidden;
+  }
+
+  /* Sticky header for tables on laptop */
+  .data-table thead {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: rgba(10,10,10,.95);
+    backdrop-filter: blur(12px);
+  }
+}
+
+/* Print styles for laptop reports */
+@media print {
+  .topbar,
+  .connection-strip,
+  .clock-strip,
+  .mobile-bottom-nav,
+  .notice,
+  .keyboard-shortcuts {
+    display: none !important;
+  }
+
+  body {
+    background: white;
+    color: black;
+    padding-bottom: 0;
+  }
+
+  .panel, .card {
+    border: 1px solid #ccc;
+    break-inside: avoid;
+  }
+}
+
+/* High DPI */
+@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+  .noise {
+    opacity: .08;
+  }
+}
+
+/* Laptop focus states */
+@media (min-width: 901px) {
+  a:focus-visible,
+  button:focus-visible,
+  input:focus-visible,
+  select:focus-visible {
+    outline: 2px solid white;
+    outline-offset: 2px;
+  }
+}

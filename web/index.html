@@ -2,10 +2,19 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#050505">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Orbix">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="description" content="Orbix Signal Lab - M1 FX research, BUY/SELL/NO SIGNAL, offline-first mobile & laptop">
   <title>Dashboard — Orbix Signal Lab</title>
+  <link rel="manifest" href="/static/manifest.json">
   <link rel="stylesheet" href="/static/styles.css?v=24">
+  <link rel="stylesheet" href="/static/mobile.css?v=1">
+  <link rel="stylesheet" href="/static/laptop.css?v=1">
+  <link rel="apple-touch-icon" href="/static/icon-192.png">
 </head>
 <body>
   <div class="noise" aria-hidden="true"></div>
@@ -632,5 +641,6 @@ ORBIX_TELEGRAM_CHAT_ID=-100...</pre>
     <span class="footer-right">BUILT FOR BETTER QUESTIONS</span>
   </footer>
   <script src="/static/app.js?v=24" defer></script>
+  <script src="/static/app-mobile.js?v=1" defer></script>
 </body>
 </html>
