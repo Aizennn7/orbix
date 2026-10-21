@@ -585,7 +585,7 @@ async def database_sync(request: Request) -> dict:
             "saved": saved,
             "backend": cfg.effective_backend.value,
             "is_live": cfg.is_supabase or cfg.is_postgres,
-            "message": f"Synced to {cfg.effective_backend.value} at root level - {'LIVE ONLINE' if cfg.is_supabase else 'offline local'}"
+            "message": f"Synced to {cfg.effective_backend.value} at root level - {'LIVE ONLINE' if cfg.is_supabase else 'offline local'} - permanent at root"
         }
     except Exception as e:
         return {"status": "error", "error": str(e)}
