@@ -1,0 +1,59 @@
+{
+  "name": "Orbix - Full Stack + APK Builder",
+  "image": "mcr.microsoft.com/devcontainers/universal:2",
+  "features": {
+    "ghcr.io/devcontainers/features/python:1": {
+      "version": "3.11",
+      "installTools": true
+    },
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "20",
+      "installYarnUsingApt": false
+    },
+    "ghcr.io/devcontainers/features/java:1": {
+      "version": "17",
+      "installMaven": true,
+      "installGradle": true
+    },
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {
+      "version": "latest"
+    }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "bradlc.vscode-tailwindcss",
+        "esbenp.prettier-vscode",
+        "ms-vscode.vscode-typescript-next",
+        "vscjava.vscode-java-pack",
+        "redhat.java"
+      ],
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash"
+      }
+    }
+  },
+  "forwardPorts": [8000, 3000, 8001],
+  "portsAttributes": {
+    "8000": {
+      "label": "Orbix Web - Root DB",
+      "onAutoForward": "notify"
+    },
+    "3000": {
+      "label": "Mobile PWA",
+      "onAutoForward": "notify"
+    },
+    "8001": {
+      "label": "Mobile API - Offline DB"
+    }
+  },
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+  "postStartCommand": "bash .devcontainer/post-start.sh",
+  "remoteEnv": {
+    "ORBIX_DATA_DIR": "${containerWorkspaceFolder}/data",
+    "DATABASE_BACKEND": "auto",
+    "PYTHONPATH": "${containerWorkspaceFolder}"
+  }
+}
