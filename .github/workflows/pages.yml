@@ -9,6 +9,7 @@ on:
     branches:
       - main
       - arena/7b0574e1-orbix
+      - arena/6260349f-orbix
     paths:
       - "docs/**"
       - ".github/workflows/pages.yml"
