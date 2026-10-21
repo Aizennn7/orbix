@@ -1,8 +1,9 @@
 /**
  * Orbix Mobile App - Main Logic
- * All Orbix inside APK with local SQLite database
+ * All Orbix inside APK with root database (live when Supabase configured at root)
  */
 import { db } from './db.js';
+import { liveDB } from './live_db.js';
 import { evaluateAll, getBestSignal, generateSignalId, strategies } from './engine.js';
 
 class OrbixMobileApp {
@@ -14,11 +15,29 @@ class OrbixMobileApp {
   }
 
   async init() {
-    console.log('[Orbix Mobile] Initializing APK with local DB...');
+    console.log('[Orbix Mobile] Initializing APK with root DB (live if Supabase at root)...');
     await db.init();
+    
+    // Check live config at root level
+    await liveDB.checkRootConfig();
+    liveDB.startAutoSync();
+    
+    // Listen for live signals from Supabase at root
+    window.addEventListener('orbix-live-signal', (e) => {
+      console.log('[Orbix Mobile] Live signal from root Supabase:', e.detail);
+      this.showNotification(`LIVE: ${e.detail.direction} ${e.detail.pair} @ ${e.detail.confidence}%`);
+      this.loadData().then(() => this.renderAll());
+    });
     
     // Load data
     await this.loadData();
+    
+    // Try live fetch from root API
+    const live = await liveDB.fetchLiveData();
+    if (live && live.candles && live.candles.length) {
+      this.candles = live.candles;
+      console.log(`[Orbix Mobile] Using ${this.candles.length} live candles from root`);
+    }
     
     // Bind UI
     this.bindEvents();
@@ -32,10 +51,10 @@ class OrbixMobileApp {
     
     this.renderAll();
     
-    // Auto-refresh every 60s (like live feed)
+    // Auto-refresh every 60s (like live feed) + live sync
     setInterval(() => this.refresh(), 60000);
     
-    console.log('[Orbix Mobile] Ready - all Orbix inside APK');
+    console.log('[Orbix Mobile] Ready - all Orbix inside APK, root DB at database/');
   }
 
   async loadData() {
@@ -357,7 +376,12 @@ class OrbixMobileApp {
         setTimeout(() => this.scanAll(), 100);
         break;
       case 'sync':
-        alert('Sync to Supabase — coming soon. Local DB is primary for APK.');
+        if (liveDB.isLive) {
+          await liveDB.syncToCloud();
+          alert('✓ Synced to Supabase at root level — now live online 24/7');
+        } else {
+          this.showSettings();
+        }
         break;
     }
   }
@@ -467,11 +491,73 @@ class OrbixMobileApp {
 
   async refresh() {
     await this.loadData();
+    // Try live fetch
+    const live = await liveDB.fetchLiveData();
+    if (live && live.candles && live.candles.length) {
+      this.candles = live.candles;
+    }
     this.renderDashboard();
+    // Sync if live
+    if (liveDB.isLive) liveDB.syncToCloud();
   }
 
   showSettings() {
-    alert(`Orbix Mobile v0.4.0\n\n• All Orbix inside APK\n• SQLite database: offline-first\n• 5 strategies: OCG, ML consensus, pullback, reversal, breakout\n• Works 24/7 on your device\n• Sync to Supabase when online (future)\n\nDB: ${this.candles.length} candles\nPair: ${this.pair}\nMode: ${window.Capacitor?.isNativePlatform() ? 'APK Native' : 'PWA Browser'}`);
+    const modal = document.getElementById('settingsModal');
+    const statusEl = document.getElementById('liveStatus');
+    const urlInput = document.getElementById('supabaseUrlInput');
+    const keyInput = document.getElementById('supabaseKeyInput');
+    
+    if (!modal) {
+      alert(`Orbix Mobile v0.5.0 LIVE\n\n• All Orbix inside APK\n• Database at root level: database/ + data/ + .env\n• SQLite offline, Supabase live when configured at root\n• 5 strategies: OCG, ML consensus, pullback, reversal, breakout\n• Works 24/7 on your device\n• LIVE ONLINE when SUPABASE_URL set at root .env\n\nDB: ${this.candles.length} candles\nPair: ${this.pair}\nMode: ${window.Capacitor?.isNativePlatform() ? 'APK Native' : 'PWA Browser'}\nLive: ${liveDB.isLive ? 'YES - Supabase at root' : 'NO - offline'}`);
+      return;
+    }
+    
+    modal.style.display = 'flex';
+    
+    // Fill current config
+    const status = liveDB.getStatus();
+    statusEl.innerHTML = `
+      <div style="display:flex;gap:8px;align-items:center;">
+        <span style="width:8px;height:8px;border-radius:50%;background:${status.isLive ? '#4ade80' : '#fbbf24'};display:inline-block;"></span>
+        <strong>${status.isLive ? 'LIVE ONLINE' : 'OFFLINE DB'}</strong>
+      </div>
+      <div style="margin-top:6px;font-size:11px;color:rgba(255,255,255,.6);">
+        Backend: ${status.backend}<br>
+        Location: ${status.location}<br>
+        Data dir: ${status.dataDir} at root<br>
+        Online: ${status.isOnline ? 'yes' : 'no'}<br>
+        ${status.supabaseConfigured ? '✓ Supabase URL configured' : '○ Supabase not configured — set at root .env for live'}
+      </div>
+    `;
+    
+    urlInput.value = localStorage.getItem('SUPABASE_URL') || '';
+    keyInput.value = localStorage.getItem('SUPABASE_ANON_KEY') || '';
+    
+    // Bind close
+    document.getElementById('closeSettings').onclick = () => modal.style.display = 'none';
+    modal.onclick = (e) => { if (e.target === modal) modal.style.display = 'none'; };
+    
+    document.getElementById('saveLiveConfig').onclick = async () => {
+      const url = urlInput.value.trim();
+      const key = keyInput.value.trim();
+      if (!url || !key) {
+        alert('Enter both URL and anon key from root .env');
+        return;
+      }
+      liveDB.configure(url, key);
+      alert('✓ Saved! Now LIVE and ONLINE — syncing to Supabase at root level.\nRebuild APK with this config to have live online in phone 24/7.');
+      modal.style.display = 'none';
+      liveDB.updateStatus();
+    };
+  }
+
+  showNotification(msg) {
+    // Simple toast
+    const toast = document.createElement('div');
+    toast.textContent = msg;
+    toast.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:rgba(100,150,255,.9);color:white;padding:12px 20px;border-radius:12px;font-size:13px;z-index:9999;backdrop-filter:blur(10px);';
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 4000);
   }
 }
 
