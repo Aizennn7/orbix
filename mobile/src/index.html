@@ -169,9 +169,87 @@
     </a>
   </nav>
 
+  <!-- Settings Modal - Root Level Supabase Config - PERMANENT -->
+  <div id="settingsModal" class="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;align-items:center;justify-content:center;padding:20px;">
+    <div style="background:#121212;border:1px solid rgba(255,255,255,.1);border-radius:16px;max-width:480px;width:100%;padding:24px;max-height:90vh;overflow:auto;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+        <h3 style="margin:0;font-size:18px;">Live & Online - Permanent Root</h3>
+        <button id="closeSettings" style="background:none;border:none;color:white;font-size:24px;cursor:pointer;">×</button>
+      </div>
+      
+      <div style="background:rgba(100,150,255,.1);border:1px solid rgba(100,150,255,.2);border-radius:10px;padding:12px;margin-bottom:16px;">
+        <strong style="font-size:13px;color:#8ab4ff;">Database PERMANENTLY at Root Level</strong>
+        <div style="font-size:12px;color:rgba(255,255,255,.6);margin-top:4px;line-height:1.5;">
+          All data inside APK configured permanently at root:<br>
+          <code>database/apk_config.json</code> + <code>data/root_config.json</code> + <code>.env</code> at root<br>
+          APK reads from <code>root_config.js</code> hardcoded (permanent) + localStorage + API
+        </div>
+      </div>
+
+      <div style="margin-bottom:16px;">
+        <div style="font-size:12px;color:rgba(255,255,255,.5);margin-bottom:6px;">PERMANENT STATUS (ROOT LEVEL)</div>
+        <div id="liveStatus" style="font-size:13px;background:rgba(255,255,255,.05);padding:10px;border-radius:8px;">Checking root config...</div>
+      </div>
+
+      <div style="margin-bottom:12px;">
+        <label style="font-size:12px;color:rgba(255,255,255,.6);">SUPABASE URL (permanent at root .env + apk_config.json)</label>
+        <input id="supabaseUrlInput" type="text" placeholder="https://xxx.supabase.co" style="width:100%;padding:10px;margin-top:4px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);color:white;border-radius:8px;font-size:14px;">
+      </div>
+      <div style="margin-bottom:12px;">
+        <label style="font-size:12px;color:rgba(255,255,255,.6);">SUPABASE ANON KEY (permanent at root)</label>
+        <input id="supabaseKeyInput" type="password" placeholder="eyJ..." style="width:100%;padding:10px;margin-top:4px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);color:white;border-radius:8px;font-size:14px;">
+      </div>
+      
+      <button id="saveLiveConfig" class="btn-primary" style="width:100%;margin-top:8px;padding:12px;border-radius:10px;">💾 SAVE PERMANENTLY AT ROOT & GO LIVE</button>
+      
+      <div style="margin-top:16px;padding-top:16px;border-top:1px solid rgba(255,255,255,.08);">
+        <div style="font-size:11px;color:rgba(255,255,255,.4);line-height:1.6;">
+          <strong>How to make LIVE permanently at root level (Codespace):</strong><br>
+          1. Create project at supabase.com<br>
+          2. SQL Editor → run <code>database/schema.sql</code> from root<br>
+          3. Copy URL + anon key from Project Settings → API<br>
+          4. <code>python scripts/configure_root_apk.py --url https://xxx --anon-key eyJ...</code><br>
+          &nbsp;&nbsp;&nbsp;&nbsp;This saves PERMANENTLY at root:<br>
+          &nbsp;&nbsp;&nbsp;&nbsp;- <code>.env</code> at root<br>
+          &nbsp;&nbsp;&nbsp;&nbsp;- <code>database/apk_config.json</code> at root<br>
+          &nbsp;&nbsp;&nbsp;&nbsp;- <code>mobile/src/js/root_config.js</code> hardcoded in APK<br>
+          5. <code>./scripts/build_mobile.sh</code> → dist contains permanent config<br>
+          6. <code>git push</code> → Actions builds APK with permanent live config<br>
+          7. APK will be LIVE ONLINE 24/7 permanently, all data at root level<br><br>
+          <strong>Files at root level (permanent):</strong><br>
+          - database/apk_config.json (APK config)<br>
+          - database/root_manifest.json (manifest)<br>
+          - data/root_config.json (cache)<br>
+          - mobile/src/js/root_config.js (hardcoded in APK)<br>
+          - All inside APK configured at root permanently
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Import file input hidden -->
   <input type="file" id="hiddenFileInput" accept=".csv" hidden>
 
+  <!-- Permanent Root Config - ALL data inside APK configured at root level -->
+  <!-- This file is generated from root .env (database/ + data/ + .env) and bundled permanently in APK -->
+  <script type="module">
+    // Load permanent root config first (from root level)
+    try {
+      const mod = await import('./js/root_config.js');
+      console.log('[Orbix] Permanent root config loaded from root level:', mod.ROOT_CONFIG);
+      window.ORBIX_ROOT_CONFIG = mod.ROOT_CONFIG;
+    } catch (e) {
+      console.log('[Orbix] No root_config.js, trying root_config.json');
+      try {
+        const res = await fetch('./root_config.json');
+        if (res.ok) {
+          const cfg = await res.json();
+          window.ORBIX_ROOT_CONFIG = cfg;
+          console.log('[Orbix] Permanent root config from root_config.json:', cfg);
+        }
+      } catch {}
+    }
+  </script>
   <script type="module" src="./js/app.js"></script>
 </body>
 </html>
