@@ -78,8 +78,10 @@ Every test using a temp dir is really reading/writing one shared database. **Thi
 **H1 — One test fails every weekend.**
 `test_dataset_scan_generates_a_paper_only_read_once` uses wall-clock time and patches `ORBIX_TRADING_SESSIONS` but not `ORBIX_WEEKDAYS_ONLY`. `discipline.py:243` blocks `weekday() >= 5`. Today is Saturday → `market_closed` → 0 signals. Confusingly, its *status* assertion still passes, so the failure looks unrelated to its cause.
 
-**H3 — `database/` is missing from the Docker image.**
-The Dockerfile copies only `orbix`, `web`, and metadata. `runtime.py`'s `from database import ...` fails, gets swallowed by a bare `except Exception`, and prints to stdout. **Production runs a different storage code path than dev.** `pyproject.toml` has the same gap (`include = ["orbix*"]`), so `pip install .` degrades identically.
+**H3 — `database/` is missing from the standalone Docker image.**
+The Dockerfile copies only `orbix`, `web`, and metadata. `runtime.py`'s `from database import ...` fails, gets swallowed by a bare `except Exception`, and prints to stdout. **Production runs a different storage code path than dev.**
+
+Scope note: `docker-compose.override.yml.example` mounts `./database:/app/database:ro`, so compose users are covered. The gap hits the **bare image** — Render, Railway, Cloud Run, Azure — and anything installed via `pip install .`, since `pyproject.toml` also omits the package (`include = ["orbix*"]`). Because the failure is silent, nothing currently tells you which path you are on.
 
 ### Non-blocking
 

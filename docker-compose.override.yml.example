@@ -9,9 +9,10 @@ services:
       DATABASE_BACKEND: ${DATABASE_BACKEND:-auto}
       # For local Postgres at root
       DATABASE_URL: ${DATABASE_URL:-postgres://orbix:orbix@postgres:5432/orbix}
-      # For Supabase cloud sync (APK syncs when online)
+      # For Supabase cloud sync (clients sync when online)
       SUPABASE_URL: ${SUPABASE_URL:-}
       SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-}
+      # service_role bypasses RLS - server-side only, never exposed to a client
       SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_KEY:-}
       # Data dir at root
       ORBIX_DATA_DIR: /data
