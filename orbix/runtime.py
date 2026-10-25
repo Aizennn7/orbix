@@ -56,7 +56,7 @@ def _safe_pair(pair: str) -> str:
 def _default_data_dir() -> Path:
     """Root level data dir - single source of truth via database/ config"""
     try:
-        # Use root-level database config - shared by web, mobile, laptop, APK
+        # Use the root-level database config shared by all clients
         from database import get_database_config
         cfg = get_database_config()
         return cfg.data_dir
@@ -70,7 +70,7 @@ class Runtime:
     """Application state with a durable candle archive and a bounded hot window.
     
     Now uses root-level database/ factory - single source of truth for all DB
-    Shared by web, mobile, laptop, APK - configured at root level
+    Shared by the web and mobile clients - configured at root level
     """
 
     def __init__(self, data_dir: str | Path | None = None) -> None:

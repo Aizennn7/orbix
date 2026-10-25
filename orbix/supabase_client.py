@@ -1,5 +1,5 @@
 """
-Orbix Supabase Client - Optional cloud sync for APK with local DB
+Orbix Supabase Client - optional cloud sync alongside the local DB
 Local SQLite is primary, Supabase is secondary sync when online
 Free tier: 500MB, enough for M1 candles
 """
@@ -18,7 +18,7 @@ except ImportError:
 
 
 class SupabaseSync:
-    """Sync local APK SQLite DB to Supabase when online"""
+    """Sync the local SQLite DB to Supabase when online"""
 
     def __init__(self, url: Optional[str] = None, key: Optional[str] = None):
         self.url = url or os.environ.get("SUPABASE_URL")
@@ -87,7 +87,7 @@ class SupabaseSync:
 
 # SQL to create tables in Supabase dashboard (SQL editor)
 SUPABASE_SQL = """
--- Run this in Supabase SQL editor to create tables for Orbix APK sync
+-- Run this in the Supabase SQL editor to create the Orbix sync tables
 
 create table if not exists datasets (
   dataset_id text primary key,
@@ -98,7 +98,7 @@ create table if not exists datasets (
   latest_timestamp timestamptz,
   created_at timestamptz default now(),
   updated_at timestamptz default now(),
-  source text default 'mobile-apk',
+  source text default 'mobile',
   user_id uuid references auth.users
 );
 
@@ -152,7 +152,7 @@ create policy "Users can manage own candles" on candles for all using (
 create policy "Users can manage own signals" on signals for all using (auth.uid() = user_id);
 create policy "Users can manage own settings" on settings for all using (auth.uid() = user_id);
 
--- For service key (bypass RLS) - APK with service key can write all
+-- The service_role key bypasses RLS and must stay on the server
 -- Use anon key with RLS for user-specific, service key for admin sync
 """
 

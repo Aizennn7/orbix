@@ -109,7 +109,7 @@ async function syncCandles() {
   });
 }
 
-// Push notifications for signals (when packaged as APK with FCM)
+// Push notifications for signals (Web Push)
 self.addEventListener('push', event => {
   const data = event.data ? event.data.json() : {};
   const title = data.title || 'Orbix Signal';

@@ -1,58 +1,31 @@
 /**
- * Orbix Live Database - PERMANENT at Root Level
- * All data inside APK configured permanently at root level
- * 
- * Config priority (permanent first):
- * 1. ROOT_CONFIG from mobile/src/js/root_config.js (hardcoded from root .env, permanent in APK)
- * 2. /root_config.json bundled in dist (from root level)
- * 3. window.ORBIX_ROOT_CONFIG (global, from root)
- * 4. localStorage (user override, saved via Settings)
- * 5. /api/database/config (API at root level)
- * 
- * Root level single source of truth:
- *   database/apk_config.json (permanent)
- *   data/root_config.json (permanent cache)
- *   .env at root (permanent)
+ * Orbix Live Database - optional Supabase sync for the mobile PWA.
+ *
+ * Configuration is resolved at runtime, never baked into the bundle:
+ *   1. localStorage (an explicit per-session override set in Settings)
+ *   2. /api/database/config (the server's own .env)
+ *
+ * Only the Supabase anon key is ever handed to a client. The service_role key
+ * stays on the server, so no credential can leak through a published build.
  */
 
 import { db as localDB } from './db.js';
 
-// Try to load permanent root config - hardcoded in APK from root level
-let ROOT_CONFIG = null;
-try {
-  // This file is generated from root .env at build time, permanent in APK
-  const mod = await import('./root_config.js').catch(() => null);
-  if (mod && mod.ROOT_CONFIG) {
-    ROOT_CONFIG = mod.ROOT_CONFIG;
-    console.log('[LiveDB] Loaded permanent ROOT_CONFIG from root level:', ROOT_CONFIG.backend, ROOT_CONFIG.is_live ? 'LIVE' : 'OFFLINE');
-  }
-} catch (e) {
-  console.log('[LiveDB] No root_config.js yet, will generate from root .env');
-}
-
-// Fallback to global if available (bundled via index.html)
-if (!ROOT_CONFIG && typeof window !== 'undefined' && window.ORBIX_ROOT_CONFIG) {
-  ROOT_CONFIG = window.ORBIX_ROOT_CONFIG;
-  console.log('[LiveDB] Loaded ROOT_CONFIG from window.ORBIX_ROOT_CONFIG (root level)');
-}
-
 class LiveDB {
   constructor() {
-    // Priority: ROOT_CONFIG (permanent at root) > localStorage > empty
-    this.supabaseUrl = (ROOT_CONFIG && ROOT_CONFIG.supabase_url) || localStorage.getItem('SUPABASE_URL') || localStorage.getItem('supabase_url') || '';
-    this.supabaseKey = (ROOT_CONFIG && ROOT_CONFIG.supabase_anon_key) || localStorage.getItem('SUPABASE_ANON_KEY') || localStorage.getItem('supabase_key') || '';
-    this.supabaseServiceKey = (ROOT_CONFIG && ROOT_CONFIG.supabase_service_key) || localStorage.getItem('SUPABASE_SERVICE_KEY') || '';
-    this.backend = (ROOT_CONFIG && ROOT_CONFIG.backend) || localStorage.getItem('DATABASE_BACKEND') || 'sqlite';
-    
+    // A per-session override only. The authoritative config is the server's .env,
+    // read through /api/database/config in checkRootConfig().
+    this.supabaseUrl = localStorage.getItem('SUPABASE_URL') || '';
+    this.supabaseKey = localStorage.getItem('SUPABASE_ANON_KEY') || '';
+    this.backend = localStorage.getItem('DATABASE_BACKEND') || 'sqlite';
+
     this.supabase = null;
-    this.isLive = !!(ROOT_CONFIG && ROOT_CONFIG.is_live) || !!(this.supabaseUrl && this.supabaseKey);
+    this.isLive = !!(this.supabaseUrl && this.supabaseKey);
     this.isOnline = navigator.onLine;
     this.syncInterval = null;
-    this.rootConfig = ROOT_CONFIG;
-    
-    console.log(`[LiveDB] Init - Backend: ${this.backend}, Live: ${this.isLive}, Source: ${ROOT_CONFIG ? 'ROOT LEVEL PERMANENT' : 'localStorage/API'}`);
-    
-    // Check root configs
+
+    console.log(`[LiveDB] Init - Backend: ${this.backend}, Live: ${this.isLive}`);
+
     this.checkRootConfig();
     
     window.addEventListener('online', () => {
@@ -67,40 +40,7 @@ class LiveDB {
   }
 
   async checkRootConfig() {
-    // 1. Try bundled root_config.json (permanent at root, bundled in APK)
-    try {
-      const res = await fetch('./root_config.json');
-      if (res.ok) {
-        const data = await res.json();
-        console.log('[LiveDB] Loaded root_config.json from dist (root level permanent):', data.backend, data.is_live ? 'LIVE' : 'OFFLINE');
-        if (data.supabase_url && data.supabase_anon_key) {
-          if (!this.supabaseUrl) this.supabaseUrl = data.supabase_url;
-          if (!this.supabaseKey) this.supabaseKey = data.supabase_anon_key;
-          this.isLive = data.is_live || this.isLive;
-          this.rootConfig = data;
-          if (this.isLive) this.initSupabase();
-        }
-        this.updateStatus();
-      }
-    } catch (e) {
-      console.log('[LiveDB] No bundled root_config.json yet');
-    }
-
-    // 2. Try public/root_config.json
-    try {
-      const res = await fetch('./public/root_config.json');
-      if (res.ok) {
-        const data = await res.json();
-        if (data.supabase_url && !this.supabaseUrl) {
-          this.supabaseUrl = data.supabase_url;
-          this.supabaseKey = data.supabase_anon_key;
-          this.isLive = true;
-          this.initSupabase();
-        }
-      }
-    } catch {}
-
-    // 3. Try root API (when running via FastAPI at root level)
+    // Ask the server for its configured backend.
     try {
       const res = await fetch('/api/database/config');
       if (res.ok) {
@@ -114,20 +54,9 @@ class LiveDB {
           this.updateStatus();
           this.fetchLiveData();
         }
-        // Also check apk_config
-        const apkRes = await fetch('/api/database/apk-config').catch(() => null);
-        if (apkRes && apkRes.ok) {
-          const apkData = await apkRes.json();
-          if (apkData.config && apkData.config.supabase_url) {
-            this.supabaseUrl = apkData.config.supabase_url;
-            this.supabaseKey = apkData.config.supabase_anon_key;
-            this.isLive = true;
-            this.initSupabase();
-          }
-        }
       }
     } catch (e) {
-      console.log('[LiveDB] No root API, using permanent root config + localStorage');
+      console.log('[LiveDB] No API reachable, falling back to the localStorage override');
       if (this.supabaseUrl && this.supabaseKey) {
         this.isLive = true;
         this.initSupabase();
@@ -135,7 +64,7 @@ class LiveDB {
       this.updateStatus();
     }
 
-    // 4. If still have URL from ROOT_CONFIG, init
+    // Init if an override was supplied.
     if (this.supabaseUrl && this.supabaseKey && !this.supabase) {
       this.initSupabase();
     }
@@ -149,20 +78,19 @@ class LiveDB {
       return false;
     }
     try {
-      // Dynamic import supabase from CDN (works in PWA, bundled in APK)
+      // Dynamic import supabase from CDN
       import('https://esm.sh/@supabase/supabase-js@2').then(({ createClient }) => {
         this.supabase = createClient(this.supabaseUrl, this.supabaseKey);
         this.isLive = true;
-        console.log('[LiveDB] Supabase client ready - LIVE and ONLINE (permanent at root level)');
+        console.log('[LiveDB] Supabase client ready - live');
         console.log(`[LiveDB] URL: ${this.supabaseUrl.slice(0,30)}...`);
         this.updateStatus();
         this.setupRealtime();
         this.syncToCloud();
         
-        // Save to localStorage as cache (but root config is primary)
+        // Cache for the next page load; the server config stays authoritative.
         localStorage.setItem('SUPABASE_URL', this.supabaseUrl);
         localStorage.setItem('SUPABASE_ANON_KEY', this.supabaseKey);
-        if (this.supabaseServiceKey) localStorage.setItem('SUPABASE_SERVICE_KEY', this.supabaseServiceKey);
         localStorage.setItem('DATABASE_BACKEND', 'supabase');
       }).catch(e => {
         console.warn('[LiveDB] Supabase CDN failed, trying local', e);
@@ -185,35 +113,27 @@ class LiveDB {
     } catch {}
   }
 
-  configure(url, anonKey, serviceKey = '') {
-    console.log('[LiveDB] Configuring permanent at root level:', url.slice(0,30));
+  // Only the anon key is accepted here. The service_role key bypasses RLS and
+  // must never be entered into, stored by, or sent from a browser client.
+  configure(url, anonKey) {
+    console.log('[LiveDB] Configuring session override:', url.slice(0, 30));
     this.supabaseUrl = url;
     this.supabaseKey = anonKey;
-    this.supabaseServiceKey = serviceKey;
-    
-    // Save to localStorage (user override)
+
     localStorage.setItem('SUPABASE_URL', url);
     localStorage.setItem('SUPABASE_ANON_KEY', anonKey);
-    if (serviceKey) localStorage.setItem('SUPABASE_SERVICE_KEY', serviceKey);
     localStorage.setItem('DATABASE_BACKEND', 'supabase');
-    
-    // Also try to save at root level via API (permanent)
+    localStorage.removeItem('SUPABASE_SERVICE_KEY');
+
     fetch('/api/database/config', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({supabase_url: url, supabase_key: anonKey, service_key: serviceKey})
+      body: JSON.stringify({supabase_url: url, supabase_key: anonKey})
     }).then(r => r.json()).then(data => {
-      console.log('[LiveDB] Saved at root level via API:', data);
+      console.log('[LiveDB] Saved via API:', data);
     }).catch(() => {
-      console.log('[LiveDB] No API, saved locally only. For permanent root level, set at root .env and rebuild APK');
+      console.log('[LiveDB] No API reachable, saved locally only. Set SUPABASE_URL in the server .env to enable sync.');
     });
-    
-    // Also update ROOT_CONFIG in memory
-    if (this.rootConfig) {
-      this.rootConfig.supabase_url = url;
-      this.rootConfig.supabase_anon_key = anonKey;
-      this.rootConfig.is_live = true;
-    }
     
     return this.initSupabase();
   }
@@ -329,7 +249,7 @@ class LiveDB {
       badge.style.background = 'rgba(100,150,255,.15)';
       badge.style.borderColor = 'rgba(100,150,255,.3)';
       badge.style.color = '#8ab4ff';
-      badge.title = `Live and online via Supabase at root level - permanent\n${this.supabaseUrl ? this.supabaseUrl.slice(0,40) : ''}\nAll data inside APK configured at root: database/ + data/ + .env`;
+      badge.title = `Live via Supabase\n${this.supabaseUrl ? this.supabaseUrl.slice(0,40) : ''}`;
     } else if (this.isOnline) {
       badge.textContent = '● ONLINE (LOCAL)';
       badge.style.background = 'rgba(74,222,128,.15)';
@@ -341,7 +261,7 @@ class LiveDB {
       badge.style.background = 'rgba(251,191,36,.15)';
       badge.style.borderColor = 'rgba(251,191,36,.3)';
       badge.style.color = '#fbbf24';
-      badge.title = 'Offline - using local SQLite inside APK, data at root data/ (permanent)';
+      badge.title = 'Offline - using local browser storage';
     }
   }
 
@@ -355,10 +275,9 @@ class LiveDB {
       rootConfig: this.rootConfig,
       supabaseUrl: this.supabaseUrl ? this.supabaseUrl.slice(0,30)+'...' : 'not set',
       supabaseConfigured: !!this.supabaseUrl,
-      dataDir: 'data/ at root level - permanent',
-      databaseDir: 'database/ at root level - permanent',
-      allDataInsideApk: true,
-      note: 'All data inside APK configured permanently at root level'
+      dataDir: 'data/ at root level',
+      databaseDir: 'database/ at root level',
+      note: 'Configuration is resolved from the server at runtime'
     };
   }
 }

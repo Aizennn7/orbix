@@ -1,7 +1,7 @@
 """
 Orbix Database - Root Level Re-export
 This file re-exports from database/ at root level for easy import
-All database config lives at root level, shared by web, mobile, laptop, APK
+All database config lives at root level, shared by the web and mobile clients
 
 Usage:
     from orbix.database import get_database_config, get_candle_store, get_ledger

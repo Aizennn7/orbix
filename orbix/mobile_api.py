@@ -1,5 +1,5 @@
 """
-Orbix Mobile API - Offline-first API for APK
+Orbix Mobile API - offline-first API for the mobile client
 Works without server, uses local SQLite, syncs to Supabase when online
 """
 from __future__ import annotations
@@ -43,7 +43,7 @@ mobile_app.add_middleware(
     allow_headers=["*"],
 )
 
-# Data dir for mobile - in APK this will be app's private storage
+# Data dir for the mobile client
 MOBILE_DATA_DIR = Path(os.environ.get("ORBIX_MOBILE_DATA_DIR", "./mobile_data"))
 candle_store, ledger = get_mobile_store(MOBILE_DATA_DIR)
 

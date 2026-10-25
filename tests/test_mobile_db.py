@@ -1,4 +1,4 @@
-"""Test mobile SQLite DB - APK offline database"""
+"""Test the mobile SQLite DB - offline database."""
 import tempfile
 from pathlib import Path
 import unittest
@@ -50,8 +50,8 @@ class TestMobileDB(unittest.TestCase):
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=1)).isoformat(),
             "probability_up": 0.56,
-            "source": "mobile-apk",
-            "reason": "Test signal inside APK",
+            "source": "mobile",
+            "reason": "Test signal",
             "features": {"rsi": 55},
             "dataset_id": "test-ds"
         }

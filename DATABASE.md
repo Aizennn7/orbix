@@ -1,6 +1,6 @@
 # Orbix Database — Root Level Configuration
 
-**All database configuration at root level — single source of truth for web, mobile, laptop, APK**
+**All database configuration at root level — single source of truth for the web and mobile clients**
 
 ## 📁 Root Level Structure
 
@@ -18,9 +18,9 @@ orbix/ (project root)
 │   ├── orbix.sqlite3          # SQLite - ledger, settings
 │   ├── candles.duckdb         # DuckDB - candles (web)
 │   ├── candles.sqlite3        # SQLite fallback
-│   ├── mobile/                # Mobile APK data
-│   │   ├── mobile_candles.db  # All candles inside APK
-│   │   └── mobile_ledger.db   # All signals inside APK
+│   ├── mobile/                # Mobile client data
+│   │   ├── mobile_candles.db  # Mobile candle cache
+│   │   └── mobile_ledger.db   # Mobile signal cache
 │   └── models/                # Trained models
 │
 ├── .env                       # <-- ROOT LEVEL ENV (DATABASE_*)
@@ -36,7 +36,7 @@ orbix/ (project root)
 
 ## ⚙️ Configuration at Root (.env)
 
-All DB config in root `.env` — shared by web, mobile, laptop, APK, Docker:
+All DB config in root `.env` — shared by the web and mobile clients, and Docker:
 
 ```bash
 # === DATABASE AT ROOT LEVEL ===
@@ -53,7 +53,7 @@ DATABASE_AUTO_MIGRATE=true
 # Postgres (production)
 DATABASE_URL=postgres://orbix:orbix@localhost:5432/orbix
 
-# Supabase (cloud, free 500MB) - for APK sync
+# Supabase (cloud, free 500MB) - optional sync
 SUPABASE_URL=https://xxx.supabase.co
 SUPABASE_ANON_KEY=eyJ...
 SUPABASE_SERVICE_KEY=eyJ...
@@ -66,7 +66,7 @@ SUPABASE_SERVICE_KEY=eyJ...
 1. **Supabase** if `SUPABASE_URL` + `SUPABASE_KEY` set → cloud sync
 2. **Postgres** if `DATABASE_URL` set → production
 3. **DuckDB** if `ORBIX_USE_DUCKDB=1` → web analytics
-4. **SQLite** if `ORBIX_MOBILE=1` or `ORBIX_APK=1` → mobile APK
+4. **SQLite** if `ORBIX_MOBILE=1` → mobile client
 5. **DuckDB** default for web, SQLite fallback
 
 ## 🚀 Usage - Root Factory
@@ -88,7 +88,7 @@ conn = get_connection()  # SQLite, DuckDB, or Postgres
 candle_store = get_candle_store()  # Uses root config
 ledger = get_ledger()
 
-# Mobile - all inside APK, same root config
+# Mobile client - same root config
 from database import get_mobile_store
 candle_store, ledger = get_mobile_store()  # data/mobile/ at root
 
@@ -101,7 +101,7 @@ health = check_database_health()
 init = init_database()  # Creates tables at root data/
 ```
 
-## 📱 Mobile APK Uses Root Config
+## 📱 Mobile Client Uses Root Config
 
 `orbix/mobile_db.py` now reads root `database/`:
 
@@ -109,10 +109,10 @@ init = init_database()  # Creates tables at root data/
 from database import get_database_config
 config = get_database_config()
 # config.mobile_candles_db = data/mobile/mobile_candles.db
-# In APK: /data/data/com.orbix.signallab/files/orbix_data/
+# Override the location with ORBIX_MOBILE_DATA_DIR
 ```
 
-Same for `mobile/src/js/db.js` — SQLite schema matches `database/sqlite_schema.sql` at root.
+The browser client (`mobile/src/js/db.js`) caches the same entities in IndexedDB.
 
 ## 💻 Docker at Root
 
@@ -161,10 +161,10 @@ Same tables: `datasets`, `candles`, `signals`, `abstentions`, `settings`, `sync_
 ## 🔗 Why Root Level?
 
 1. **Single source of truth** — `.env` at root, `database/` at root, `data/` at root
-2. **Shared by all** — web, mobile APK, laptop Electron, Docker all use same root config
+2. **Shared by all** — web, mobile PWA, Electron and Docker all use the same root config
 3. **Easy to configure** — set `DATABASE_URL` once at root, all apps use it
 4. **Offline first** — SQLite at root works everywhere, no native libs
-5. **Cloud ready** — set `SUPABASE_URL` at root, APK syncs when online
+5. **Cloud ready** — set `SUPABASE_URL` at root and clients sync when online
 
 ## ✅ Migration Done
 

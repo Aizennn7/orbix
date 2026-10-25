@@ -1,6 +1,6 @@
 /**
  * Orbix Mobile App - Main Logic
- * All Orbix inside APK with root database (live when Supabase configured at root)
+ * Mobile PWA client. Local IndexedDB store with optional Supabase sync.
  */
 import { db } from './db.js';
 import { liveDB } from './live_db.js';
@@ -15,7 +15,7 @@ class OrbixMobileApp {
   }
 
   async init() {
-    console.log('[Orbix Mobile] Initializing APK with root DB (live if Supabase at root)...');
+    console.log('[Orbix Mobile] Initialising local store...');
     await db.init();
     
     // Check live config at root level
@@ -54,7 +54,7 @@ class OrbixMobileApp {
     // Auto-refresh every 60s (like live feed) + live sync
     setInterval(() => this.refresh(), 60000);
     
-    console.log('[Orbix Mobile] Ready - all Orbix inside APK, root DB at database/');
+    console.log('[Orbix Mobile] Ready');
   }
 
   async loadData() {
@@ -71,7 +71,7 @@ class OrbixMobileApp {
   }
 
   async generateDemoData() {
-    console.log('[Orbix Mobile] Generating demo M1 candles for APK...');
+    console.log('[Orbix Mobile] Generating demo M1 candles...');
     const datasetId = `demo-${Date.now()}`;
     const now = new Date();
     const candles = [];
@@ -160,7 +160,7 @@ class OrbixMobileApp {
     db.getStorageInfo().then(info => {
       document.getElementById('statCandles').textContent = info.candles;
       document.getElementById('statSignals').textContent = info.signals;
-      document.getElementById('statWin').textContent = info.dbType.includes('SQLite') ? 'APK DB' : 'IndexedDB';
+      document.getElementById('statWin').textContent = info.dbType;
     });
 
     // Latest signal
@@ -329,8 +329,8 @@ class OrbixMobileApp {
         <div>Datasets: ${info.datasets} • Candles: ${info.candles} • Signals: ${info.signals}</div>
         <div>Est. Size: ${info.estimatedSize}</div>
         <div style="margin-top:8px;padding:8px;background:rgba(74,222,128,.1);border:1px solid rgba(74,222,128,.2);border-radius:6px;color:#4ade80;">
-          ✓ All Orbix data lives inside APK — offline, no server needed<br>
-          ✓ Database configured at root level: database/ + data/ + .env
+          ✓ Data is cached locally — works offline<br>
+          ✓ Server configuration comes from the .env at the project root
         </div>
         ${rootInfo}
       </div>
@@ -344,7 +344,7 @@ class OrbixMobileApp {
       <div style="padding:12px;">
         <div style="font-size:10px;font-weight:600;margin-bottom:8px;">JOURNAL — OFFLINE</div>
         <div style="font-size:8px;color:var(--muted);line-height:1.6;">
-          • All trades stored in APK SQLite<br>
+          • All trades stored in local IndexedDB<br>
           • Works 24/7 even without internet<br>
           • Sync to Supabase when online (future)<br>
           • Discipline rules enforced locally
@@ -409,17 +409,11 @@ class OrbixMobileApp {
       await db.saveSignal(signal);
       // Haptic feedback on mobile
       if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
-      // Notification
-      if (window.Capacitor?.isNativePlatform()) {
+      // Browser notification, only when the user has granted permission.
+      if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
         try {
-          const { LocalNotifications } = await import('@capacitor/local-notifications');
-          await LocalNotifications.schedule({
-            notifications: [{
-              title: `Orbix ${result.side}`,
-              body: `${this.pair} ${result.side} @ ${signal.entry_price.toFixed(5)} - ${result.reason.slice(0,60)}`,
-              id: Date.now(),
-              schedule: { at: new Date(Date.now() + 1000) }
-            }]
+          new Notification(`Orbix ${result.side}`, {
+            body: `${this.pair} ${result.side} @ ${signal.entry_price.toFixed(5)} - ${result.reason.slice(0, 60)}`
           });
         } catch {}
       }
@@ -479,7 +473,7 @@ class OrbixMobileApp {
   }
 
   async clearDB() {
-    if (!confirm('Clear all local APK database? This deletes all candles and signals inside APK.')) return;
+    if (!confirm('Clear all local data? This deletes all cached candles and signals in this browser.')) return;
     await db.clearAll();
     this.candles = [];
     this.datasetId = null;
@@ -508,7 +502,7 @@ class OrbixMobileApp {
     const keyInput = document.getElementById('supabaseKeyInput');
     
     if (!modal) {
-      alert(`Orbix Mobile v0.5.0 LIVE\n\n• All Orbix inside APK\n• Database at root level: database/ + data/ + .env\n• SQLite offline, Supabase live when configured at root\n• 5 strategies: OCG, ML consensus, pullback, reversal, breakout\n• Works 24/7 on your device\n• LIVE ONLINE when SUPABASE_URL set at root .env\n\nDB: ${this.candles.length} candles\nPair: ${this.pair}\nMode: ${window.Capacitor?.isNativePlatform() ? 'APK Native' : 'PWA Browser'}\nLive: ${liveDB.isLive ? 'YES - Supabase at root' : 'NO - offline'}`);
+      alert(`Orbix Mobile v0.5.0\n\n• 5 strategies: OCG, ML consensus, pullback, reversal, breakout\n• Local IndexedDB cache, works offline\n• Optional Supabase sync when configured on the server\n\nDB: ${this.candles.length} candles\nPair: ${this.pair}\nMode: PWA Browser\nLive: ${liveDB.isLive ? 'YES - Supabase' : 'NO - offline'}`);
       return;
     }
     
@@ -545,7 +539,7 @@ class OrbixMobileApp {
         return;
       }
       liveDB.configure(url, key);
-      alert('✓ Saved! Now LIVE and ONLINE — syncing to Supabase at root level.\nRebuild APK with this config to have live online in phone 24/7.');
+      alert('✓ Saved. Syncing to Supabase for this session.\nFor a persistent setting, put SUPABASE_URL and SUPABASE_ANON_KEY in the server .env.');
       modal.style.display = 'none';
       liveDB.updateStatus();
     };

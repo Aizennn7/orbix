@@ -1,7 +1,7 @@
 """
-Orbix Mobile Database Adapter - SQLite for APK, works offline
+Orbix Mobile Database Adapter - SQLite store for the mobile client, works offline
 Replaces DuckDB for mobile where native libs unavailable
-Supports both laptop (Electron) and mobile (Capacitor) with same API
+Same API for the desktop (Electron) and mobile clients
 """
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ except Exception as e:
 
 
 class MobileCandleStore:
-    """SQLite-backed candle store for mobile APK - offline first"""
+    """SQLite-backed candle store for the mobile client - offline first"""
 
     def __init__(self, database: str | Path):
         self.database = Path(database)
@@ -313,7 +313,7 @@ class MobileLedger:
 
 
 def get_mobile_store(data_dir: Path) -> tuple[MobileCandleStore, MobileLedger]:
-    """Factory for mobile stores - single entry point for APK"""
+    """Factory for the mobile client stores."""
     data_dir = Path(data_dir)
     data_dir.mkdir(parents=True, exist_ok=True)
     candle_db = data_dir / "mobile_candles.db"

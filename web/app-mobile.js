@@ -8,16 +8,14 @@
   const isMobile = window.innerWidth <= 900;
   const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
   const isElectron = navigator.userAgent.includes('Electron');
-  const isCapacitor = window.Capacitor !== undefined;
 
   // Add platform classes
   document.documentElement.classList.toggle('is-mobile', isMobile);
   document.documentElement.classList.toggle('is-standalone', isStandalone);
   document.documentElement.classList.toggle('is-electron', isElectron);
-  document.documentElement.classList.toggle('is-capacitor', isCapacitor);
 
   // Register service worker for PWA
-  if ('serviceWorker' in navigator && !isCapacitor) {
+  if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
       navigator.serviceWorker.register('/static/service-worker.js')
         .then(reg => console.log('[Orbix] SW registered', reg.scope))
@@ -267,7 +265,7 @@
     const banner = document.createElement('div');
     banner.style.cssText = 'position:fixed;bottom:90px;left:12px;right:12px;z-index:80;padding:14px;background:linear-gradient(100deg,rgba(20,20,20,.98),rgba(10,10,10,.98));border:1px solid var(--line-bright);border-radius:12px;display:flex;align-items:center;justify-content:space-between;gap:12px;backdrop-filter:blur(16px);';
     banner.innerHTML = `
-      <div><div style="font-size:10px;font-weight:600;letter-spacing:.08em;">INSTALL ORBIX</div><div style="font-size:8px;color:var(--muted);margin-top:2px;">Add to home screen for offline APK-like experience</div></div>
+      <div><div style="font-size:10px;font-weight:600;letter-spacing:.08em;">INSTALL ORBIX</div><div style="font-size:8px;color:var(--muted);margin-top:2px;">Add to home screen for an offline-capable experience</div></div>
       <button id="pwaInstallBtn" style="padding:10px 16px;background:white;color:black;border:0;border-radius:8px;font-size:9px;font-weight:700;letter-spacing:.08em;">INSTALL</button>
       <button id="pwaDismissBtn" style="width:32px;height:32px;background:transparent;border:1px solid var(--line);color:var(--muted);border-radius:6px;">×</button>
     `;
@@ -310,24 +308,12 @@
     updateOfflineStatus();
   });
 
-  // Capacitor back button
-  if (isCapacitor) {
-    document.addEventListener('backbutton', () => {
-      if (document.querySelector('.mobile-drawer.is-open')) {
-        document.querySelector('.mobile-drawer').classList.remove('is-open');
-      } else {
-        window.history.back();
-      }
-    }, false);
-  }
-
   // Expose for debugging
   window.OrbixMobile = {
     offlineDB,
     isMobile,
     isStandalone,
     isElectron,
-    isCapacitor,
     updateOfflineStatus
   };
 

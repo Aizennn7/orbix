@@ -2,7 +2,7 @@ import { defineConfig } from 'vite';
 import { resolve } from 'path';
 
 // Base path for GitHub Pages: https://Aizennn7.github.io/orbix/
-// Set via env: VITE_BASE=/orbix/ for Pages, default / for local/APK
+// Set via env: VITE_BASE=/orbix/ for Pages, default / for local dev
 const base = process.env.VITE_BASE || process.env.BASE || '/';
 
 export default defineConfig({

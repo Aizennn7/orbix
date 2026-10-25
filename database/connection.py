@@ -1,6 +1,6 @@
 """
 Orbix Database Connection - Root Level Factory
-Single entry point for all database connections across web, mobile, laptop, APK
+Single entry point for all database connections across the web and mobile clients
 """
 from __future__ import annotations
 
@@ -75,7 +75,7 @@ def get_duckdb_connection(config: Optional[DatabaseConfig] = None):
     try:
         import duckdb
     except ImportError:
-        # Fallback to SQLite if DuckDB not available (e.g., APK)
+        # Fallback to SQLite if DuckDB is not available
         print("[DB] DuckDB not available, fallback to SQLite")
         return get_sqlite_connection(config)
     
@@ -158,7 +158,7 @@ def get_candle_store(config: Optional[DatabaseConfig] = None, backend: Optional[
         if effective == DatabaseBackend.SQLITE or config.is_postgres or config.is_supabase:
             # For SQLite backend, use MobileCandleStore or SQLite version
             # Check if mobile mode
-            if os.environ.get("ORBIX_MOBILE") or os.environ.get("ORBIX_APK") or "mobile" in str(config.data_dir):
+            if os.environ.get("ORBIX_MOBILE") or "mobile" in str(config.data_dir):
                 from orbix.mobile_db import MobileCandleStore
                 store = MobileCandleStore(config.mobile_candles_db if hasattr(config, 'mobile_candles_db') else config.sqlite_candles_path)
             else:
@@ -218,7 +218,7 @@ def get_ledger(config: Optional[DatabaseConfig] = None, backend: Optional[str] =
 
 
 def get_mobile_store(config: Optional[DatabaseConfig] = None):
-    """Get mobile stores - for APK, all inside"""
+    """Get the mobile client stores."""
     if config is None:
         config = get_config()
     
@@ -285,7 +285,7 @@ def init_database(config: Optional[DatabaseConfig] = None) -> dict:
         # Mobile DB
         try:
             candle_store, ledger = get_mobile_store(config)
-            result["tables"].append("mobile: SQLite inside APK")
+            result["tables"].append("mobile: SQLite")
         except Exception as e:
             result["tables"].append(f"mobile: failed {e}")
         

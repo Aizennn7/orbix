@@ -1,5 +1,5 @@
 /**
- * Orbix Supabase Sync - JS client for APK
+ * Orbix Supabase Sync - JS client for the mobile PWA
  * Local SQLite is primary, Supabase syncs when online
  */
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';

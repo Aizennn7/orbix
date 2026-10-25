@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class DatabaseBackend(str, Enum):
     """Supported database backends"""
-    SQLITE = "sqlite"           # Default, works everywhere, mobile APK, laptop
+    SQLITE = "sqlite"           # Portable default - works everywhere, no server
     DUCKDB = "duckdb"           # Analytics, fast for candles, web default
     POSTGRES = "postgres"       # Production, Supabase compatible
     SUPABASE = "supabase"       # Supabase cloud (Postgres + Auth + Realtime)
@@ -52,7 +52,7 @@ class DatabaseConfig:
     supabase_key: Optional[str] = None  # anon or service key
     supabase_service_key: Optional[str] = None
     
-    # Mobile specific - all inside APK
+    # Mobile client specific
     mobile_data_dir: Path = None  # Will be data_dir / "mobile" or app private
     mobile_candles_db: Path = None
     mobile_ledger_db: Path = None
@@ -115,7 +115,7 @@ class DatabaseConfig:
             return DatabaseBackend.POSTGRES
         if os.environ.get("ORBIX_USE_DUCKDB", "").lower() in ("1", "true", "yes"):
             return DatabaseBackend.DUCKDB
-        if os.environ.get("ORBIX_MOBILE", "").lower() in ("1", "true", "yes") or os.environ.get("ORBIX_APK"):
+        if os.environ.get("ORBIX_MOBILE", "").lower() in ("1", "true", "yes"):
             return DatabaseBackend.SQLITE
         
         # Default: DuckDB for web, SQLite for mobile
@@ -155,7 +155,7 @@ def get_database_config(env: Optional[dict] = None) -> DatabaseConfig:
     data_dir_str = env.get("ORBIX_DATA_DIR", env.get("DATABASE_DATA_DIR", "")).strip()
     data_dir = Path(data_dir_str).expanduser() if data_dir_str else ROOT / "data"
     
-    # Mobile data dir - for APK
+    # Mobile data dir
     mobile_dir_str = env.get("ORBIX_MOBILE_DATA_DIR", env.get("MOBILE_DATA_DIR", "")).strip()
     mobile_data_dir = Path(mobile_dir_str).expanduser() if mobile_dir_str else None
     

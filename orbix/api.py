@@ -427,90 +427,25 @@ def storage_status() -> dict:
 
 @app.get("/api/database/config")
 def database_config() -> dict:
-    """Root level database config - single source of truth, permanent"""
+    """Root level database config - single source of truth"""
     try:
         from database import get_database_config
         cfg = get_database_config()
-        # Also check permanent APK config at root level
-        root = Path(__file__).resolve().parents[1]
-        apk_config = {}
-        apk_config_path = root / "database" / "apk_config.json"
-        if apk_config_path.exists():
-            import json
-            try:
-                apk_config = json.loads(apk_config_path.read_text())
-            except:
-                pass
         return {
             "status": "ok",
             "config": cfg.to_dict(),
-            "apk_config": apk_config,
             "root_level": True,
-            "permanent": True,
             "location": "database/ + data/ + .env at root - single source of truth",
             "data_dir": str(cfg.data_dir),
-            "note": "All data inside APK configured permanently at root level, shared by web, mobile, laptop, APK"
+            "note": "Database configuration is shared by the web and mobile clients."
         }
-    except Exception as e:
-        return {"status": "error", "error": str(e)}
-
-
-@app.get("/api/database/apk-config")
-def database_apk_config() -> dict:
-    """Permanent APK config at root level - all data inside APK configured at root"""
-    try:
-        root = Path(__file__).resolve().parents[1]
-        apk_config_path = root / "database" / "apk_config.json"
-        root_manifest_path = root / "database" / "root_manifest.json"
-        data_root_config_path = root / "data" / "root_config.json"
-        
-        import json
-        apk_config = {}
-        manifest = {}
-        data_config = {}
-        
-        if apk_config_path.exists():
-            apk_config = json.loads(apk_config_path.read_text())
-        if root_manifest_path.exists():
-            manifest = json.loads(root_manifest_path.read_text())
-        if data_root_config_path.exists():
-            data_config = json.loads(data_root_config_path.read_text())
-        
-        from database import get_database_config
-        cfg = get_database_config()
-        
-        return {
-            "status": "ok",
-            "config": apk_config,
-            "manifest": manifest,
-            "data_config": data_config,
-            "current": cfg.to_dict(),
-            "root_level": True,
-            "permanent": True,
-            "location": "database/apk_config.json at root - permanent APK config",
-            "note": "All data inside APK configured permanently at root level"
-        }
-    except Exception as e:
-        return {"status": "error", "error": str(e)}
-
-
-@app.get("/api/database/root-manifest")
-def database_root_manifest() -> dict:
-    """Root manifest - all data inside APK at root level"""
-    try:
-        root = Path(__file__).resolve().parents[1]
-        manifest_path = root / "database" / "root_manifest.json"
-        import json
-        if manifest_path.exists():
-            return {"status": "ok", "manifest": json.loads(manifest_path.read_text()), "permanent": True, "location": "database/root_manifest.json at root"}
-        return {"status": "error", "error": "Manifest not found, run scripts/configure_root_apk.py --build"}
     except Exception as e:
         return {"status": "error", "error": str(e)}
 
 
 @app.post("/api/database/config")
 async def database_config_update(request: Request) -> dict:
-    """Update root level Supabase config from mobile APK - makes live online"""
+    """Update the root Supabase config used by the web and mobile clients"""
     try:
         body = await request.json()
         url = body.get("supabase_url") or body.get("url") or ""
@@ -541,7 +476,7 @@ async def database_config_update(request: Request) -> dict:
 
 @app.post("/api/database/sync")
 async def database_sync(request: Request) -> dict:
-    """Sync mobile APK data to root database (live when Supabase configured)"""
+    """Sync client data to the root database (live when Supabase is configured)"""
     try:
         body = await request.json()
         signals = body.get("signals", [])
@@ -585,7 +520,7 @@ async def database_sync(request: Request) -> dict:
             "saved": saved,
             "backend": cfg.effective_backend.value,
             "is_live": cfg.is_supabase or cfg.is_postgres,
-            "message": f"Synced to {cfg.effective_backend.value} at root level - {'LIVE ONLINE' if cfg.is_supabase else 'offline local'} - permanent at root"
+            "message": f"Synced to {cfg.effective_backend.value} at root level - {'live' if cfg.is_supabase else 'offline local'}"
         }
     except Exception as e:
         return {"status": "error", "error": str(e)}

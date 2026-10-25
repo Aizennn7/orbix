@@ -1,6 +1,6 @@
 -- Orbix Database Schema - Root Level - Postgres / Supabase
 -- Run this in Supabase SQL Editor or psql
--- All Orbix data at root level, shared by web, mobile, laptop, APK
+-- All Orbix data at root level, shared by the web and mobile clients
 
 -- Enable UUID extension
 create extension if not exists "uuid-ossp";
@@ -169,7 +169,7 @@ create table if not exists settings (
   user_id uuid references auth.users(id)
 );
 
--- Sync queue - for offline-first APK
+-- Sync queue - offline-first clients
 create table if not exists sync_queue (
   id bigserial primary key,
   table_name text not null,
@@ -209,7 +209,7 @@ alter table sync_queue enable row level security;
 alter table provider_settings enable row level security;
 
 -- Policies: authenticated users can manage own data, service role bypasses RLS
--- For APK with service key, RLS is bypassed
+-- The service_role key bypasses RLS; keep it on the server only
 
 -- Allow all for service role (bypass RLS)
 -- For anon/authenticated, user_id must match
@@ -272,7 +272,7 @@ values (1, 'demo-root', 'EUR/USD', 'SYNTHETIC DEMO')
 on conflict (singleton) do nothing;
 
 -- Comments
-comment on table datasets is 'Candle archives - root level, shared by web, mobile, laptop, APK';
+comment on table datasets is 'Candle archives - root level, shared by all clients';
 comment on table candles is 'M1 OHLCV candles - all Orbix data inside database';
 comment on table signals is 'Paper trading signals - BUY/SELL/NO SIGNAL with offline sync';
-comment on table sync_queue is 'Offline-first sync queue for APK - syncs to Supabase when online';
+comment on table sync_queue is 'Offline-first sync queue - syncs to Supabase when online';
