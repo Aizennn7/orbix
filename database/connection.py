@@ -149,11 +149,26 @@ def get_candle_store(config: Optional[DatabaseConfig] = None, backend: Optional[
             pass
     
     effective = config.effective_backend
-    cache_key = f"{effective.value}:{config.data_dir}"
+    # Key on the files that will actually be opened, not on data_dir. Keying on
+    # data_dir let the key and the target diverge: two configs with different
+    # data_dir values but stale derived paths produced two cache entries bound
+    # to the same physical database.
+    cache_key = "{}:{}:{}:{}".format(
+        effective.value,
+        config.duckdb_path,
+        config.sqlite_candles_path,
+        config.mobile_candles_db,
+    )
     
     with _lock:
-        if cache_key in _candle_store_cache:
-            return _candle_store_cache[cache_key]
+        cached = _candle_store_cache.get(cache_key)
+        if cached is not None:
+            # Never hand back a closed store: the caller would get a dead DuckDB
+            # connection. Drop the entry and fall through to rebuild it.
+            if getattr(cached, "closed", False):
+                _candle_store_cache.pop(cache_key, None)
+            else:
+                return cached
         
         if effective == DatabaseBackend.SQLITE or config.is_postgres or config.is_supabase:
             # For SQLite backend, use MobileCandleStore or SQLite version
@@ -194,11 +209,19 @@ def get_ledger(config: Optional[DatabaseConfig] = None, backend: Optional[str] =
         except ValueError:
             pass
     
-    cache_key = f"ledger:{config.data_dir}"
+    # Key on the resolved files, for the same reason as get_candle_store().
+    cache_key = "ledger:{}:{}".format(config.sqlite_path, config.mobile_ledger_db)
     
     with _lock:
-        if cache_key in _ledger_cache:
-            return _ledger_cache[cache_key]
+        cached = _ledger_cache.get(cache_key)
+        if cached is not None:
+            # Same guard as get_candle_store(): a closed ledger is rebuilt
+            # rather than returned. Ledgers have no close() today, so this is
+            # defensive - getattr keeps it correct if one is added later.
+            if getattr(cached, "closed", False):
+                _ledger_cache.pop(cache_key, None)
+            else:
+                return cached
         
         effective = config.effective_backend
         

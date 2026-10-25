@@ -16,4 +16,7 @@ dependencies = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["orbix*"]
+# database/ is imported by orbix.runtime for backend selection, so it must ship
+# with the package or an installed Orbix silently falls back to the legacy
+# DuckDB/SQLite stores.
+include = ["orbix*", "database*"]

@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from dataclasses import replace
 from hashlib import sha256
+import logging
 import os
 from pathlib import Path
 import re
@@ -27,6 +28,8 @@ from .model import (
 from .prediction import build_prediction
 from .strategies import EXECUTABLE_STRATEGIES
 
+
+logger = logging.getLogger(__name__)
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT / "data"
@@ -87,7 +90,12 @@ class Runtime:
                 self.ledger = get_ledger(db_config)
                 self.db_config = db_config
             except Exception as e:
-                print(f"[Runtime] Root DB config failed ({e}), fallback to legacy")
+                logger.warning(
+                    "Root database config unavailable (%s); falling back to the "
+                    "legacy DuckDB/SQLite stores. Backend selection from "
+                    "database/ is NOT active - if this is unexpected, the "
+                    "`database` package is missing from this deployment.", e,
+                )
                 self.data_dir = _default_data_dir()
                 self.model_dir = self.data_dir / "models"
                 self.lock = threading.RLock()
@@ -100,12 +108,22 @@ class Runtime:
             self.lock = threading.RLock()
             try:
                 from database import get_database_config, get_candle_store, get_ledger
-                db_config = get_database_config()
-                db_config.data_dir = self.data_dir
+                # Build the config WITH this data dir. Assigning to
+                # `db_config.data_dir` afterwards does not recompute
+                # duckdb_path / sqlite_path, which would leave every Runtime
+                # silently sharing the database at the previous location.
+                db_config = get_database_config({**os.environ, "ORBIX_DATA_DIR": str(self.data_dir)})
                 self.candle_store = get_candle_store(db_config)
                 self.ledger = get_ledger(db_config)
                 self.db_config = db_config
-            except Exception:
+            except Exception as exc:
+                logger.warning(
+                    "Root database config unavailable (%s); falling back to the "
+                    "legacy DuckDB/SQLite stores in %s. Backend selection from "
+                    "database/ is NOT active - if this is unexpected, the "
+                    "`database` package is missing from this deployment.",
+                    exc, self.data_dir,
+                )
                 self.candle_store = CandleStore(self.data_dir / "candles.duckdb")
                 self.ledger = PaperLedger(self.data_dir / "orbix.sqlite3")
                 self.db_config = None

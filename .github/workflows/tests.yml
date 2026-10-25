@@ -1,0 +1,60 @@
+name: Tests
+
+# Runs on every push and pull request with NO paths filter.
+#
+# The suite previously ran only inside deploy-azure.yml, gated to orbix/**,
+# web/** and tests/**. A regression in database/** or scripts/** therefore never
+# ran a single test - which is how the DatabaseConfig path bug that broke 18
+# tests went unnoticed. Anything that can change behaviour must run this.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Unit tests (Python 3.11)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run the test suite
+        env:
+          # Keep runs hermetic: a scratch data dir per job, and no inherited
+          # auth configuration so the suite never exercises a logged-in path by
+          # accident.
+          ORBIX_DATA_DIR: ${{ runner.temp }}/orbix-test-data
+          ORBIX_DASHBOARD_PASSWORD: ""
+          ORBIX_DASHBOARD_PASSWORD_HASH: ""
+          ORBIX_SESSION_SECRET: ""
+        run: python -m unittest discover -s tests -t . -v
+
+      - name: Confirm the suite left no database in the working tree
+        run: |
+          if [ -d data ]; then
+            echo "Tests wrote to ./data - Runtime is not honouring ORBIX_DATA_DIR."
+            find data -type f | head -n 20
+            exit 1
+          fi
+          echo "Clean: no ./data directory was created."

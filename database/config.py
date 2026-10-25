@@ -19,6 +19,17 @@ from typing import Optional
 
 ROOT = Path(__file__).resolve().parents[1]
 
+# Paths derived from `data_dir` in DatabaseConfig.__post_init__.
+# set_data_dir() clears these so they are recomputed against the new directory.
+_DERIVED_PATH_FIELDS = (
+    "sqlite_path",
+    "sqlite_candles_path",
+    "duckdb_path",
+    "mobile_data_dir",
+    "mobile_candles_db",
+    "mobile_ledger_db",
+)
+
 
 class DatabaseBackend(str, Enum):
     """Supported database backends"""
@@ -68,7 +79,14 @@ class DatabaseConfig:
             self.data_dir = Path(self.data_dir).expanduser()
         self.data_dir = self.data_dir.resolve() if self.data_dir.is_absolute() else (ROOT / self.data_dir).resolve()
         
-        # Default paths at root level
+        # Default paths at root level.
+        #
+        # These are derived from data_dir ONCE, here. Assigning to
+        # `config.data_dir` later does NOT recompute them, and the stores would
+        # keep opening the old files. To point a config at a different
+        # directory, build a new one via
+        # `get_database_config({**os.environ, "ORBIX_DATA_DIR": str(path)})`
+        # or call `set_data_dir(path)`.
         if self.sqlite_path is None:
             self.sqlite_path = self.data_dir / "orbix.sqlite3"
         if self.sqlite_candles_path is None:
@@ -85,7 +103,20 @@ class DatabaseConfig:
         # Ensure data_dir exists
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.mobile_data_dir.mkdir(parents=True, exist_ok=True)
-    
+
+    def set_data_dir(self, data_dir) -> "DatabaseConfig":
+        """Repoint this config at a different data directory.
+
+        Every path derived from `data_dir` is recomputed. Plain assignment
+        (`config.data_dir = path`) does NOT do this and silently leaves the
+        stores pointing at the previous directory, so always use this method.
+        """
+        self.data_dir = data_dir
+        for field in _DERIVED_PATH_FIELDS:
+            setattr(self, field, None)
+        self.__post_init__()
+        return self
+
     @property
     def is_postgres(self) -> bool:
         return self.backend in (DatabaseBackend.POSTGRES, DatabaseBackend.SUPABASE) or bool(self.database_url and "postgres" in self.database_url)

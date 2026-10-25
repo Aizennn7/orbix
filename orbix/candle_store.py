@@ -32,7 +32,17 @@ class CandleStore:
         self.tail_rows = max(720, int(tail_rows))
         self._lock = threading.RLock()
         self._connection = duckdb.connect(str(self.database))
+        self._closed = False
         self._initialize()
+
+    @property
+    def closed(self) -> bool:
+        """True once close() has run.
+
+        The database/connection.py store cache checks this before handing a
+        cached instance back, so a closed store is never reused.
+        """
+        return self._closed
 
     def _initialize(self) -> None:
         with self._lock:
@@ -482,4 +492,7 @@ class CandleStore:
 
     def close(self) -> None:
         with self._lock:
+            if self._closed:
+                return
             self._connection.close()
+            self._closed = True

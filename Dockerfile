@@ -18,6 +18,10 @@ COPY requirements.txt ./
 RUN python -m pip install --no-cache-dir -r requirements.txt
 
 COPY orbix ./orbix
+# database/ is a runtime dependency of orbix.runtime, not dev tooling: it
+# provides the backend factory (DuckDB / SQLite / Postgres / Supabase). Without
+# it the import fails and Runtime silently degrades to the legacy stores.
+COPY database ./database
 COPY web ./web
 COPY pyproject.toml README.md .env.example ./
 
