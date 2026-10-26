@@ -234,9 +234,40 @@ def get_candle_store(config: Optional[DatabaseConfig] = None, backend: Optional[
     with _lock:
         cached = _candle_store_cache.get(cache_key)
         if cached is not None:
-            # Never hand back a closed store: the caller would get a dead DuckDB
-            # connection. Drop the entry and fall through to rebuild it.
-            if getattr(cached, "closed", False):
+            stale = getattr(cached, "closed", False)
+            if not stale:
+                # Nor one whose database file has disappeared.
+                #
+                # CandleStore opens a single DuckDB connection in __init__ and
+                # reuses it at every one of its query sites, so it cannot
+                # re-create its directory on demand the way the SQLite stores
+                # do. If the data directory is removed at runtime - a volume
+                # remount, a cleanup job - the open handle keeps writing to an
+                # unlinked inode. Nothing raises, and every candle written after
+                # that point is silently discarded when the process exits. That
+                # is worse than the SQLite failure mode, because it looks like
+                # success. Rebuilding is the only route back to durable writes.
+                db_file = getattr(cached, "database", None)
+                if db_file is not None and not Path(db_file).exists():
+                    logger.warning(
+                        "[DB] candle store file %s disappeared; closing the stale "
+                        "handle and rebuilding. Candles written to it since the "
+                        "directory vanished are lost.",
+                        db_file,
+                    )
+                    stale = True
+            if stale:
+                # Never hand back a closed or orphaned store: the caller would
+                # get a dead DuckDB connection, or one writing to nothing. Drop
+                # the entry and fall through to rebuild it.
+                closer = getattr(cached, "close", None)
+                if callable(closer):
+                    try:
+                        closer()
+                    except Exception:
+                        logger.warning(
+                            "[DB] failed to close a stale candle store", exc_info=True
+                        )
                 _candle_store_cache.pop(cache_key, None)
             else:
                 return cached

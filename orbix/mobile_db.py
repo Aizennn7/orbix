@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from .domain import Candle, parse_datetime
+from .storage_guard import ensure_parent
 
 logger = logging.getLogger(__name__)
 
@@ -38,15 +39,26 @@ class MobileCandleStore:
 
     def __init__(self, database: str | Path):
         self.database = Path(database)
+        self._reviving = False
         self.database.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
+        revived = ensure_parent(self.database, "MobileCandleStore")
         conn = sqlite3.connect(str(self.database), check_same_thread=False)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL;")
         conn.execute("PRAGMA synchronous=NORMAL;")
+        if revived and not self._reviving:
+            # Directory restored, database file not: this connection points at
+            # an empty file. Rebuild the schema before it is used. _lock is an
+            # RLock and _initialize() re-enters it on this same thread.
+            self._reviving = True
+            try:
+                self._initialize()
+            finally:
+                self._reviving = False
         return conn
 
     def _initialize(self) -> None:
@@ -211,14 +223,24 @@ class MobileLedger:
 
     def __init__(self, database: str | Path):
         self.database = Path(database)
+        self._reviving = False
         self.database.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
+        revived = ensure_parent(self.database, "MobileLedger")
         conn = sqlite3.connect(str(self.database), check_same_thread=False)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL;")
+        if revived and not self._reviving:
+            # Directory restored, database file not: rebuild the schema so the
+            # caller gets tables rather than "no such table". See PaperLedger.
+            self._reviving = True
+            try:
+                self._initialize()
+            finally:
+                self._reviving = False
         return conn
 
     def _initialize(self) -> None:

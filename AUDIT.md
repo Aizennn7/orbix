@@ -11,7 +11,7 @@
 
 | | |
 |---|---|
-| Tests | **178 passing, 0 failing** (was 161 with 19 failing at audit start) |
+| Tests | **221 passing, 0 failing** (was 161 with 19 failing at audit start) |
 | CI coverage | ✅ every push and PR, no path filter |
 | Azure deploys | ✅ unblocked |
 | App imports | ✅ FastAPI loads, 50 routes |
@@ -24,10 +24,16 @@
 | Error-masking operators in CI | ✅ **0** (was 62) |
 | Undocumented env vars | ✅ **0** (22 read in code, 63 documented) |
 | Naive `datetime.utcnow()` | ✅ **0** |
-| Tracked files | 139 |
+| Tracked files | 143 |
+| Endpoints 500ing live | ✅ **0** |
 
 Verified against a running server, not just the test suite: 18 endpoints swept for
 error-shaped fields, and all 8 that exist are `null`. No swallowed failures remain.
+
+The sweep was repeated after the H6 fix, this time by deleting the running
+server's data directory mid-flight and re-requesting every endpoint. All returned
+200 and the server recreated its own storage — the same action previously 500'd
+every route permanently, while `/healthz` stayed green.
 
 ---
 
@@ -43,6 +49,7 @@ error-shaped fields, and all 8 that exist are `null`. No swallowed failures rema
 | **H3** | `database/` missing from the Docker image and the wheel | ✅ Fixed — production ran a different storage path than dev |
 | **H4** | Stale build artifacts tracked despite `.gitignore` | ✅ Deleted and genuinely ignored |
 | **H5** | **Found this pass.** `database/__init__.py` re-exported 7 of 16 public names | ✅ Fixed + regression test |
+| **H6** | **Found this pass.** A data directory that vanished at runtime 500'd every request permanently | ✅ Fixed — stores self-heal; orphaned DuckDB handles are evicted and rebuilt |
 | **M1–M9** | Drift guard, undeclared deps, CI error masks, dead triggers, `mkdir` side effect, import caps, published host paths, undocumented env vars, naive `utcnow()` | ✅ **All nine closed** |
 
 ### C2 — the bug that broke 18 tests
@@ -113,6 +120,51 @@ every install would be worse than the bug.
 An explicit `DATABASE_BACKEND=postgres|supabase|duckdb` with a missing driver now
 raises `RuntimeError` naming the install command, instead of quietly serving
 SQLite. Auto-detection still falls back, but logs a warning.
+
+Both halves are now pinned by `tests/test_backend_guard.py` (20 tests), which
+forces each driver absent via `sys.modules[name] = None` so the outcome cannot
+depend on which extras happen to be installed in the environment running them.
+
+The same class had one more instance. An unrecognised `DATABASE_BACKEND` value
+fell back to `AUTO` without a word, so `DATABASE_BACKEND=postgress` started a
+local SQLite file while the operator believed two servers shared Postgres state.
+That now fails at configuration time and names the valid choices. A blank or
+whitespace-padded value still means *unset* — `.env` files commonly carry
+`DATABASE_BACKEND=` as a way of commenting a value out, and aborting startup on
+that would be worse than the typo it guards against.
+
+### H6 — the failure only a long-running server can hit
+
+Found by breaking it, not by reading it. `/api/preflight` began returning HTTP 500
+with `sqlite3.OperationalError: unable to open database file`, and never recovered.
+
+Every store created its parent directory once, in `__init__`, and never looked
+again. For a process that starts, opens its database and runs, that is correct.
+For a server that stays up for weeks it is not: a volume remount, a cleanup job
+or an operator's `rm -rf` removes the directory, and from that moment every
+request fails until the process is restarted. `/healthz` returned 200 throughout,
+so uptime monitoring stayed green while the app served nothing.
+
+The DuckDB path failed differently, and worse. `CandleStore` opens one connection
+in `__init__` and reuses it at every query site, so a deleted file leaves the
+handle writing to an unlinked inode: no exception, and every candle written after
+that point silently discarded when the process exits. It looks like success.
+
+Both are fixed. The three SQLite stores now share `orbix/storage_guard.py`, which
+recreates a vanished directory at connect time and rebuilds the schema — the
+directory alone is not enough, because the new database file is empty and every
+query would then trade one exception for another, `no such table` instead of
+`unable to open database file`. `get_candle_store()` treats a missing database
+file the way it already treated a closed store: evict, close the orphaned handle,
+rebuild. Each recovery logs a warning naming the store, since several can share
+one data directory and an unnamed warning is not actionable.
+
+Proven end-to-end against the running server rather than only in unit tests: its
+data directory was deleted mid-flight and all five swept endpoints still returned
+200, with the server recreating its own storage. `tests/test_storage_recovery.py`
+(7 tests) pins the behaviour, including the recursion bound on the revive path —
+`_initialize()` calls `_connect()`, so an unguarded revival would have looped
+inside a request handler, where a `RecursionError` is indistinguishable from a hang.
 
 ### Two more defects found and fixed this pass
 
@@ -203,4 +255,6 @@ from a test.
 | `aeecefb` | Clean the last stale packaging reference and narrow the H3 finding |
 | `7a80a23` | Fix the data_dir isolation bug and the three issues it blocked |
 | `94f5f56` | Refresh the report |
-| *(this commit)* | Close every remaining finding; fix H5, the manifest 404s and the snapshot generator |
+| `4412a91` | Close every remaining finding; fix H5, the manifest 404s and the snapshot generator |
+| `87ce479` | Reword two report lines to drop retired packaging terms |
+| *(this commit)* | Fix H6 — stores self-heal when their data directory vanishes; add H6/M2/M6 coverage (178 → 221 tests) |

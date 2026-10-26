@@ -185,11 +185,33 @@ def get_database_config(env: Optional[dict] = None) -> DatabaseConfig:
         env = os.environ
     
     # Backend from env
-    backend_str = env.get("DATABASE_BACKEND", env.get("ORBIX_DATABASE_BACKEND", "auto")).lower()
+    # Every other value read below is stripped, and this one has to be too. A
+    # blank "DATABASE_BACKEND=" line is the normal way to comment a value out in
+    # a .env file, and a stray trailing space is a typo with no intent behind it;
+    # neither should be mistaken for a backend name and abort startup.
+    backend_str = (
+        env.get("DATABASE_BACKEND", env.get("ORBIX_DATABASE_BACKEND", "auto"))
+        .strip()
+        .lower()
+    ) or "auto"
     try:
         backend = DatabaseBackend(backend_str)
     except ValueError:
-        backend = DatabaseBackend.AUTO
+        # Only a value that was actually set can be wrong; an unset or blank
+        # variable already resolved to "auto" above and is not an error.
+        #
+        # This used to fall back to AUTO silently. That turns a typo into a
+        # different database: DATABASE_BACKEND=postgress starts a local SQLite
+        # file while the operator believes two servers are sharing Postgres
+        # state. Same class as the swallowed ImportError in the Docker build and
+        # the missing re-export in database/__init__.py - the process looks
+        # healthy and is quietly wrong. Fail at configuration time instead,
+        # where the message can name the valid choices.
+        valid = ", ".join(b.value for b in DatabaseBackend)
+        raise RuntimeError(
+            f"DATABASE_BACKEND={backend_str!r} is not a recognised backend. "
+            f"Valid values: {valid}. Remove the variable to auto-detect."
+        ) from None
     
     # Data dir - root level
     data_dir_str = env.get("ORBIX_DATA_DIR", env.get("DATABASE_DATA_DIR", "")).strip()

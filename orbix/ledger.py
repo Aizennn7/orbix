@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 
 from .abstentions import REASON_LABELS, SESSION_ORDER, classify_reason, hour_bucket, session_for
 from .metrics import wilson_interval
+from .storage_guard import ensure_parent
 
 
 def _normalise_entry_time(value: datetime | str | None) -> str | None:
@@ -32,12 +33,29 @@ class PaperLedger:
 
     def __init__(self, database: str | Path):
         self.database = Path(database)
+        self._reviving = False
         self.database.parent.mkdir(parents=True, exist_ok=True)
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
+        revived = ensure_parent(self.database, "Ledger")
         connection = sqlite3.connect(self.database)
         connection.row_factory = sqlite3.Row
+        if revived and not self._reviving:
+            # The directory came back but the database file did not, so this
+            # connection points at an empty file with no tables. Rebuild the
+            # schema before handing it out.
+            #
+            # _initialize() calls _connect() again, but ensure_parent() now
+            # finds the directory and returns False, so this does not recurse.
+            # The flag bounds it anyway: if mkdir reported success yet is_dir()
+            # still failed (permissions, or a stale mount) the alternative is
+            # unbounded recursion inside a request handler.
+            self._reviving = True
+            try:
+                self._initialize()
+            finally:
+                self._reviving = False
         return connection
 
     def _initialize(self) -> None:
