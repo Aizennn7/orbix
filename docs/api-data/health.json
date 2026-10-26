@@ -4,11 +4,11 @@
   "candles_in_memory": 720,
   "candles_loaded": 720,
   "clock": {
-    "data_time": "2026-10-20T08:57:00Z",
-    "lag_seconds": 607.6,
+    "data_time": "2026-10-26T08:26:00Z",
+    "lag_seconds": 107.5,
     "mode": "LIVE",
-    "reference": "2026-10-20T09:07:07.554817Z",
-    "server_time": "2026-10-20T09:07:07.554817Z",
+    "reference": "2026-10-26T08:27:47.495690Z",
+    "server_time": "2026-10-26T08:27:47.495690Z",
     "source": "SYNTHETIC DEMO"
   },
   "dashboard_auth_enabled": false,
@@ -22,5 +22,5 @@
   "project": "Orbix Signal Lab",
   "status": "ok",
   "storage_engine": "DuckDB",
-  "storage_path": "/tmp/orbix-preview/candles.duckdb"
+  "storage_path": "candles.duckdb"
 }

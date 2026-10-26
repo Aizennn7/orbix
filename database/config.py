@@ -100,7 +100,16 @@ class DatabaseConfig:
         if self.mobile_ledger_db is None:
             self.mobile_ledger_db = self.mobile_data_dir / "mobile_ledger.db"
         
-        # Ensure data_dir exists
+        # Ensure data_dir exists.
+        #
+        # Deliberate side effect: constructing a config creates its directories.
+        # This is impure - merely reading configuration touches the filesystem -
+        # but every consumer (DuckDB, SQLite, the mobile stores, the CSV upload
+        # spool) needs the directory to exist before it opens a handle, and they
+        # are called from enough places that pushing mkdir to each caller is how
+        # one ends up with a store that fails only on a fresh volume. Kept here
+        # so the invariant holds by construction. set_data_dir() re-runs it for
+        # the same reason.
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.mobile_data_dir.mkdir(parents=True, exist_ok=True)
 

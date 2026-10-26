@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import sys
 import urllib.error
@@ -82,16 +83,102 @@ def fetch(base_url: str, path: str, timeout: float = 20.0) -> dict | list:
         return json.loads(response.read().decode("utf-8"))
 
 
+# Keys whose values are absolute filesystem paths on whatever machine ran the
+# capture. docs/ is published to a public GitHub Pages site, so these would
+# disclose the server's directory layout (and, for /tmp/orbix-preview, the
+# scratch location of a preview run). They are useful when debugging locally and
+# worthless to a reader of the snapshot, so they are reduced to a file name.
+PATH_KEYS = frozenset({"path", "storage_path", "db_path", "database_path"})
+
+# Absolute paths also leak through values that are not paths at all. The capture
+# that exposed this carried
+#   "database_config_error": "cannot import name 'check_database_health' from
+#      'database' (/home/user/orbix/database/__init__.py)"
+# so keying redaction off field names is not sufficient: an exception message
+# will embed whatever directory the server happened to run from. Match the host
+# roots that actually appear in deployment (containers, home dirs, scratch tmp)
+# rather than every leading slash, so URLs and relative paths are left alone.
+HOST_PATH = re.compile(
+    r"/(?:home|tmp|var|root|mnt|srv|opt|Users|workspace)/[^\s\"'(),\[\]]*"
+)
+
+
+def _scrub_host_paths(value: str) -> str:
+    """Replace embedded absolute host paths with their basename."""
+    return HOST_PATH.sub(lambda m: Path(m.group(0)).name, value)
+
+
+def redact_paths(payload):
+    """Recursively strip host filesystem paths from a captured payload.
+
+    Runs on every payload before it is written to docs/, so neither a new
+    path-valued field nor a new exception message can silently start publishing
+    the server's directory layout to a public site.
+    """
+    if isinstance(payload, dict):
+        return {
+            key: (
+                Path(value).name
+                if key in PATH_KEYS and isinstance(value, str) and value.startswith("/")
+                else redact_paths(value)
+            )
+            for key, value in payload.items()
+        }
+    if isinstance(payload, list):
+        return [redact_paths(item) for item in payload]
+    if isinstance(payload, str):
+        return _scrub_host_paths(payload)
+    return payload
+
+
+# Every asset reference the dashboard serves under /static/. The old code
+# enumerated four exact strings; web/index.html has since grown to seven
+# references (manifest.json, mobile.css, laptop.css, icon-192.png and
+# app-mobile.js were added), so the snapshot build started failing its own
+# guard. Matching by pattern means a newly added asset cannot silently break
+# the Pages build again.
+STATIC_REF = re.compile(r"""(?P<q>["'])/static/(?P<path>[^"']+)(?P=q)""")
+
+
+def rewrite_static_refs(text: str) -> str:
+    """Turn absolute /static/ URLs into snapshot-relative ones.
+
+    GitHub Pages serves docs/ from a subpath, so an absolute /static/... URL
+    would resolve against the repository root and 404.
+    """
+    return STATIC_REF.sub(lambda m: f"{m.group('q')}{m.group('path')}{m.group('q')}", text)
+
+
+def referenced_assets(text: str) -> list[str]:
+    """Every web/ file the given HTML or JSON pulls in, in document order."""
+    ordered: dict[str, None] = {}
+    for match in STATIC_REF.finditer(text):
+        # Drop the ?v=24 cache-buster; the file on disk has no query string.
+        ordered.setdefault(match.group("path").split("?", 1)[0], None)
+    return list(ordered)
+
+
+def resolve_asset_closure() -> list[str]:
+    """Assets referenced by index.html, plus those referenced by those assets.
+
+    manifest.json is referenced by the HTML and itself references the icons, so
+    a single pass over index.html would copy the manifest but not the images it
+    points at. Two levels is enough: nothing below the icons references further
+    assets.
+    """
+    assets = referenced_assets((WEB / "index.html").read_text(encoding="utf-8"))
+    for name in list(assets):
+        nested = WEB / name
+        if nested.is_file() and nested.suffix == ".json":
+            for extra in referenced_assets(nested.read_text(encoding="utf-8")):
+                if extra not in assets:
+                    assets.append(extra)
+    return assets
+
+
 def build_index(source: str) -> str:
     html = (WEB / "index.html").read_text(encoding="utf-8")
-    html = html.replace('<link rel="stylesheet" href="/static/styles.css?v=24">',
-                        '<link rel="stylesheet" href="styles.css?v=24">')
-    html = html.replace('<link rel="stylesheet" href="/static/styles.css?v=1">',
-                        '<link rel="stylesheet" href="styles.css?v=1">')
-    html = html.replace('<script src="/static/app.js?v=24" defer></script>',
-                        '<script src="app.js?v=24" defer></script>')
-    html = html.replace('<script src="/static/app.js?v=1" defer></script>',
-                        '<script src="app.js?v=1" defer></script>')
+    html = rewrite_static_refs(html)
     if "/static/" in html:
         raise SystemExit("index.html still references /static/; update build_static_demo.py")
 
@@ -159,19 +246,51 @@ def main() -> int:
     if "preflight.json" not in payloads:
         raise SystemExit("Capture failed: /api/preflight is required.")
 
+    # Do every step that can fail BEFORE removing the committed snapshot. The
+    # previous order rmtree'd docs/ and only then built index.html, so a single
+    # new asset reference in web/ deleted the published snapshot and left the
+    # repository with nothing to serve - recovery required a git checkout.
+    # Build first, destroy second.
+    index_html = build_index(SOURCE_TEXT)
+    assets = resolve_asset_closure()
+
     if DOCS.exists():
         shutil.rmtree(DOCS)
     (DOCS / "api-data").mkdir(parents=True)
 
     for filename, payload in payloads.items():
         (DOCS / "api-data" / filename).write_text(
-            json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            json.dumps(redact_paths(payload), indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
 
-    shutil.copy2(WEB / "styles.css", DOCS / "styles.css")
-    shutil.copy2(WEB / "app.js", DOCS / "app.js")
+    copied: list[str] = []
+    skipped: list[str] = []
+    for name in assets:
+        source = WEB / name
+        if not source.is_file():
+            # web/manifest.json declares two screenshots that do not exist. The
+            # builder must not fail the whole snapshot over an asset the live app
+            # is already serving a 404 for.
+            skipped.append(name)
+            continue
+        target = DOCS / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if source.suffix == ".json":
+            # manifest.json points its own icons at /static/... as well.
+            target.write_text(
+                rewrite_static_refs(source.read_text(encoding="utf-8")), encoding="utf-8"
+            )
+        else:
+            shutil.copy2(source, target)
+        copied.append(name)
+    if skipped:
+        print(
+            f"  note: referenced but absent from web/, skipped: {', '.join(skipped)}",
+            file=sys.stderr,
+        )
+
     (DOCS / "static-demo.css").write_text(BANNER_CSS.strip() + "\n", encoding="utf-8")
-    (DOCS / "index.html").write_text(build_index(SOURCE_TEXT), encoding="utf-8")
+    (DOCS / "index.html").write_text(index_html, encoding="utf-8")
     (DOCS / ".nojekyll").write_text("", encoding="utf-8")
 
     manifest = {

@@ -2,14 +2,23 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#050505">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Orbix">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="description" content="Orbix Signal Lab - M1 FX research, BUY/SELL/NO SIGNAL, offline-first mobile & laptop">
   <title>Orbix Signal Lab — static snapshot</title>
+  <link rel="manifest" href="manifest.json">
   <link rel="stylesheet" href="styles.css?v=24">
+  <link rel="stylesheet" href="mobile.css?v=1">
+  <link rel="stylesheet" href="laptop.css?v=1">
+  <link rel="apple-touch-icon" href="icon-192.png">
   <link rel="stylesheet" href="static-demo.css">
 </head>
 <body>
-<div class="static-banner" role="status"><strong>STATIC SNAPSHOT</strong><span>2026-10-20 09:07 UTC · source: SYNTHETIC DEMO · captured from a real Orbix run</span><span>Read-only: no live feed, no scheduler, no orders. Data-changing buttons are disabled.</span></div>
+<div class="static-banner" role="status"><strong>STATIC SNAPSHOT</strong><span>2026-10-26 08:27 UTC · source: SYNTHETIC DEMO · captured from a real Orbix run</span><span>Read-only: no live feed, no scheduler, no orders. Data-changing buttons are disabled.</span></div>
   <div class="noise" aria-hidden="true"></div>
   <header class="topbar shell">
     <a class="brand" href="#dashboard" aria-label="Orbix Signal Lab dashboard">
@@ -635,5 +644,6 @@ ORBIX_TELEGRAM_CHAT_ID=-100...</pre>
   </footer>
   <script>window.ORBIX_STATIC = true;</script>
   <script src="app.js?v=24" defer></script>
+  <script src="app-mobile.js?v=1" defer></script>
 </body>
 </html>

@@ -15,11 +15,11 @@
       "status": "blocked"
     },
     {
-      "detail": "Latest bar is 608s old (limit 180s).",
+      "detail": "Latest bar is 108s old (limit 180s).",
       "id": "freshness",
       "label": "Latest completed bar",
       "required": true,
-      "status": "blocked"
+      "status": "ready"
     },
     {
       "detail": "Polls every 60s; a bar older than 180s is treated as stale. The poll interval fits inside the freshness window.",
@@ -100,7 +100,7 @@
     "enabled": true,
     "last_cursor": null,
     "last_entry_time": null,
-    "latest_entry": "2026-10-20T08:57:00Z",
+    "latest_entry": "2026-10-26T08:26:00Z",
     "learned": 0,
     "note": "One test-before-learn update per completed bar, whether or not a signal was delivered. These are not paper trades and are excluded from win rate and Telegram.",
     "resolved": 0,
@@ -109,7 +109,7 @@
   },
   "execution_mode": "MANUAL",
   "execution_ready": false,
-  "generated_at": "2026-10-20T09:07:07.574537Z",
+  "generated_at": "2026-10-26T08:27:47.513666Z",
   "note": "Preflight checks configuration and warm-up only. Readiness is not a performance forecast, and calibration describes past outcomes.",
   "pair": "EUR/USD",
   "ready": false,

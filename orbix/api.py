@@ -3,10 +3,13 @@ from __future__ import annotations
 import asyncio
 from concurrent.futures import ThreadPoolExecutor, wait
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from html import escape as html_escape
 import hmac
+import logging
 import os
 from pathlib import Path
+import shutil
 import tempfile
 from typing import Callable
 from urllib.parse import parse_qs, quote
@@ -45,10 +48,36 @@ from .strategies import strategy_catalog_payload
 from .telegram import TelegramError
 
 
+logger = logging.getLogger(__name__)
+
 ROOT = Path(__file__).resolve().parents[1]
 WEB_DIR = ROOT / "web"
-MAX_IMPORT_BYTES = 1024 * 1024 * 1024
-MAX_APPEND_BYTES = 64 * 1024 * 1024
+
+
+def _mb_env(name: str, default_mb: int) -> int:
+    """Read an upload cap in megabytes, falling back to a sane default.
+
+    The import cap used to be a hard-coded 1 GiB. At roughly 75 bytes per
+    one-minute candle that is ~14 million rows, or about 26 years of continuous
+    data - orders of magnitude past the largest window this app reads (backtest
+    2500, model training 5000, stored tail 10000). A cap that large is not a
+    limit, it is an invitation to fill the disk, so the default is now bounded
+    and operators who genuinely need more can raise it explicitly.
+    """
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default_mb * 1024 * 1024
+    try:
+        value = int(float(raw))
+    except ValueError:
+        return default_mb * 1024 * 1024
+    if value < 1:
+        return default_mb * 1024 * 1024
+    return value * 1024 * 1024
+
+
+MAX_IMPORT_BYTES = _mb_env("ORBIX_MAX_IMPORT_MB", 256)
+MAX_APPEND_BYTES = _mb_env("ORBIX_MAX_APPEND_MB", 64)
 
 # Load ORBIX root .env before Runtime or AutomationService read configuration.
 # Real process variables keep precedence, so `uvicorn --env-file` still works.
@@ -348,6 +377,22 @@ def _telegram_http_error(exc: TelegramError) -> HTTPException:
 async def _with_streamed_csv(request: Request, max_bytes: int, processor: Callable[[Path], dict]) -> dict:
     upload_root = runtime.data_dir / "tmp"
     upload_root.mkdir(parents=True, exist_ok=True)
+    # A byte cap bounds one request but not the filesystem. The stream is
+    # spooled to disk before it is parsed, and the parsed candles are then
+    # written to the store, so the same bytes cost roughly twice over. Refuse
+    # up front rather than filling the volume mid-write and leaving a truncated
+    # upload plus a corrupted store behind.
+    free_bytes = shutil.disk_usage(upload_root).free
+    required = max_bytes * 2
+    if free_bytes < required:
+        raise HTTPException(
+            status_code=507,
+            detail=(
+                "Not enough free disk space to accept this upload. "
+                f"Free up at least {(required - free_bytes) // (1024 * 1024)} MB "
+                "on the data volume and retry."
+            ),
+        )
     try:
         with tempfile.TemporaryDirectory(prefix="csv-upload-", dir=upload_root) as temp_dir:
             path = Path(temp_dir) / "candles.csv"
@@ -459,7 +504,7 @@ async def database_config_update(request: Request) -> dict:
         runtime_cfg_path = cfg.data_dir / "runtime_supabase.json"
         runtime_cfg_path.parent.mkdir(parents=True, exist_ok=True)
         import json
-        runtime_cfg_path.write_text(json.dumps({"supabase_url": url, "supabase_anon_key": key, "updated_at": __import__("datetime").datetime.utcnow().isoformat()}, indent=2))
+        runtime_cfg_path.write_text(json.dumps({"supabase_url": url, "supabase_anon_key": key, "updated_at": datetime.now(timezone.utc).isoformat()}, indent=2))
         # Also set env for current process
         os.environ["SUPABASE_URL"] = url
         os.environ["SUPABASE_ANON_KEY"] = key
@@ -497,15 +542,14 @@ async def database_sync(request: Request) -> dict:
                 pass
             # For now, save to local file as sync log
             import json
-            from datetime import datetime
             sync_log = cfg.data_dir / "mobile_sync.json"
             existing = []
             if sync_log.exists():
                 try:
                     existing = json.loads(sync_log.read_text())
-                except:
+                except (json.JSONDecodeError, OSError):
                     existing = []
-            existing.append({"at": datetime.utcnow().isoformat(), "signals": len(signals), "datasets": len(datasets), "candles": len(candles)})
+            existing.append({"at": datetime.now(timezone.utc).isoformat(), "signals": len(signals), "datasets": len(datasets), "candles": len(candles)})
             # Keep last 100
             existing = existing[-100:]
             sync_log.write_text(json.dumps(existing, indent=2))
@@ -513,7 +557,7 @@ async def database_sync(request: Request) -> dict:
             saved["datasets"] = len(datasets)
             saved["candles"] = len(candles)
         except Exception as e:
-            print(f"[Sync] Error: {e}")
+            logger.warning("[Sync] Error: %s", e)
         
         return {
             "status": "ok",

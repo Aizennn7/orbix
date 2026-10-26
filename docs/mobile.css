@@ -1,0 +1,340 @@
+/* Orbix Mobile Interface - Responsive & Touch Optimized */
+:root {
+  --mobile-nav-height: 64px;
+  --mobile-bottom-nav-height: 72px;
+  --touch-target: 44px;
+}
+
+/* Mobile Bottom Navigation - Hidden on desktop */
+.mobile-bottom-nav {
+  display: none;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  height: var(--mobile-bottom-nav-height);
+  background: linear-gradient(180deg, rgba(12,12,12,.98), rgba(5,5,5,.99));
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-top: 1px solid var(--line-bright);
+  padding: 6px 0 calc(6px + env(safe-area-inset-bottom));
+}
+
+.mobile-bottom-nav-inner {
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  height: 100%;
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 0 8px;
+}
+
+.mobile-nav-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 4px;
+  border-radius: 10px;
+  color: var(--muted);
+  text-decoration: none;
+  transition: all .2s ease;
+  min-height: var(--touch-target);
+  justify-content: center;
+}
+
+.mobile-nav-item .nav-icon {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  font-size: 16px;
+}
+
+.mobile-nav-item .nav-label {
+  font-size: 7px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.mobile-nav-item.active {
+  color: var(--ink);
+  background: rgba(255,255,255,.08);
+}
+
+.mobile-nav-item.active .nav-icon {
+  filter: drop-shadow(0 0 8px rgba(255,255,255,.5));
+}
+
+/* Hamburger Menu */
+.mobile-menu-toggle {
+  display: none;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255,255,255,.04);
+  color: var(--ink);
+  place-items: center;
+  cursor: pointer;
+}
+
+.mobile-menu-toggle span {
+  display: block;
+  width: 18px;
+  height: 1px;
+  background: currentColor;
+  margin: 4px 0;
+  transition: all .2s ease;
+}
+
+/* Mobile Drawer */
+.mobile-drawer {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: rgba(0,0,0,.6);
+  backdrop-filter: blur(4px);
+}
+
+.mobile-drawer.is-open {
+  display: block;
+}
+
+.mobile-drawer-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(320px, 85vw);
+  background: linear-gradient(180deg, rgba(18,18,18,.99), rgba(8,8,8,.99));
+  border-left: 1px solid var(--line-bright);
+  padding: 20px;
+  overflow-y: auto;
+  transform: translateX(100%);
+  transition: transform .3s ease;
+}
+
+.mobile-drawer.is-open .mobile-drawer-panel {
+  transform: translateX(0);
+}
+
+.mobile-drawer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+/* Touch Optimizations */
+@media (max-width: 900px) {
+  .shell {
+    width: min(100% - 24px, 1440px);
+  }
+
+  .topbar {
+    min-height: 64px;
+    gap: 12px;
+  }
+
+  .brand {
+    min-width: auto;
+  }
+
+  .brand-copy small {
+    display: none;
+  }
+
+  .top-nav {
+    display: none;
+  }
+
+  .mobile-menu-toggle {
+    display: grid;
+  }
+
+  .mobile-bottom-nav {
+    display: block;
+  }
+
+  /* Add bottom padding to avoid nav overlap */
+  body {
+    padding-bottom: calc(var(--mobile-bottom-nav-height) + env(safe-area-inset-bottom));
+  }
+
+  .app-main {
+    padding-bottom: 20px;
+  }
+
+  /* Hero stack on mobile */
+  .hero {
+    grid-template-columns: 1fr;
+    min-height: auto;
+  }
+
+  .hero-art {
+    height: 200px;
+    order: -1;
+  }
+
+  /* Engine layout stack */
+  .engine-layout,
+  .data-layout,
+  .connection-layout {
+    grid-template-columns: 1fr;
+  }
+
+  /* Cards full width */
+  .panel, .card {
+    border-radius: 12px;
+  }
+
+  /* Buttons touch target */
+  .button-primary,
+  .button-secondary,
+  .top-signout,
+  .credit-trigger {
+    min-height: var(--touch-target);
+    min-width: var(--touch-target);
+  }
+
+  /* Forms */
+  .provider-input,
+  .key-input {
+    font-size: 16px; /* Prevent iOS zoom */
+    min-height: 44px;
+  }
+
+  /* Connection strip wrap */
+  .connection-strip {
+    flex-wrap: wrap;
+    min-height: auto;
+    padding: 12px;
+  }
+
+  .connection-summary {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  /* Clock strip scroll */
+  .clock-strip {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    gap: 16px;
+    padding: 12px;
+  }
+
+  .clock-strip::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Tables horizontal scroll */
+  .table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Credit popup full width on mobile */
+  .credit-popup {
+    position: fixed;
+    top: auto;
+    bottom: calc(var(--mobile-bottom-nav-height) + 10px);
+    left: 12px;
+    right: 12px;
+    width: auto;
+  }
+}
+
+/* Small phones */
+@media (max-width: 430px) {
+  .shell {
+    width: calc(100% - 16px);
+  }
+
+  .hero h1, .page-heading h1 {
+    font-size: 32px;
+  }
+
+  .mobile-bottom-nav-inner {
+    padding: 0 4px;
+  }
+
+  .mobile-nav-item .nav-label {
+    font-size: 6px;
+  }
+}
+
+/* Tablet */
+@media (min-width: 901px) and (max-width: 1120px) {
+  .top-nav {
+    gap: 14px;
+  }
+
+  .top-nav a {
+    font-size: 8px;
+  }
+}
+
+/* Landscape mobile */
+@media (max-height: 500px) and (max-width: 900px) {
+  .mobile-bottom-nav {
+    height: 56px;
+  }
+
+  .mobile-nav-item {
+    flex-direction: row;
+    gap: 6px;
+  }
+
+  .mobile-nav-item .nav-label {
+    font-size: 8px;
+  }
+
+  .hero-art {
+    display: none;
+  }
+}
+
+/* PWA Standalone tweaks */
+@media (display-mode: standalone) {
+  .topbar {
+    padding-top: env(safe-area-inset-top);
+    min-height: calc(64px + env(safe-area-inset-top));
+  }
+
+  .mobile-bottom-nav {
+    padding-bottom: calc(6px + env(safe-area-inset-bottom));
+  }
+}
+
+/* Dark mode already default, but ensure */
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: dark;
+  }
+}
+
+/* Reduce motion for accessibility */
+@media (prefers-reduced-motion: reduce) {
+  .mobile-drawer-panel,
+  .mobile-nav-item,
+  .page-view.is-active {
+    transition: none;
+    animation: none;
+  }
+}
+
+/* High contrast */
+@media (prefers-contrast: high) {
+  .mobile-nav-item.active {
+    border: 1px solid white;
+  }
+}

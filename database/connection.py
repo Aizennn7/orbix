@@ -4,6 +4,7 @@ Single entry point for all database connections across the web and mobile client
 """
 from __future__ import annotations
 
+import logging
 import os
 import sqlite3
 import threading
@@ -12,10 +13,26 @@ from typing import Optional, Union
 
 from .config import DatabaseConfig, DatabaseBackend, get_config, get_database_config
 
+logger = logging.getLogger(__name__)
+
 # Lazy imports - only import when needed
 _candle_store_cache = {}
 _ledger_cache = {}
 _lock = threading.RLock()
+
+
+def _backend_is_explicit(config: DatabaseConfig) -> bool:
+    """True when the operator named a backend instead of leaving it on ``auto``.
+
+    The distinction decides whether a missing driver may fall back. Under
+    ``auto`` the fallback chain *is* the feature: pick the best backend that
+    this machine can actually open. But when someone wrote
+    ``DATABASE_BACKEND=postgres``, silently handing them a local SQLite file
+    means two servers believe they share state when they do not. That is the
+    same failure mode as a swallowed ImportError in the Docker build, so it
+    raises instead.
+    """
+    return config.backend != DatabaseBackend.AUTO
 
 
 def get_connection(backend: Optional[Union[str, DatabaseBackend]] = None, config: Optional[DatabaseConfig] = None):
@@ -75,8 +92,22 @@ def get_duckdb_connection(config: Optional[DatabaseConfig] = None):
     try:
         import duckdb
     except ImportError:
-        # Fallback to SQLite if DuckDB is not available
-        print("[DB] DuckDB not available, fallback to SQLite")
+        # DuckDB is a declared hard dependency (pyproject.toml and
+        # requirements.txt), so its absence means a broken install rather than a
+        # platform that legitimately lacks it. Same rule as the Postgres and
+        # Supabase paths: an explicit request fails loudly, auto-detection warns
+        # and falls back.
+        if _backend_is_explicit(config):
+            raise RuntimeError(
+                "DATABASE_BACKEND=duckdb was requested but duckdb is not "
+                "installed. Refusing to fall back to SQLite, because the candle "
+                "store would silently change engine. Reinstall dependencies "
+                "with: pip install -r requirements.txt"
+            ) from None
+        logger.warning(
+            "[DB] DuckDB not available (auto backend); falling back to SQLite. "
+            "Reinstall dependencies with: pip install -r requirements.txt"
+        )
         return get_sqlite_connection(config)
     
     db_path = config.duckdb_path
@@ -95,6 +126,7 @@ def get_postgres_connection(config: Optional[DatabaseConfig] = None):
         # Fallback
         return get_sqlite_connection(config)
     
+    explicit = _backend_is_explicit(config)
     try:
         import psycopg2
         from psycopg2.extras import RealDictCursor
@@ -109,10 +141,26 @@ def get_postgres_connection(config: Optional[DatabaseConfig] = None):
         conn = psycopg2.connect(dsn, cursor_factory=RealDictCursor)
         return conn
     except ImportError:
-        print("[DB] psycopg2 not installed, trying supabase")
+        if explicit:
+            raise RuntimeError(
+                "DATABASE_BACKEND=postgres was requested but psycopg2 is not "
+                "installed. Refusing to fall back to a local file, because two "
+                "servers would then believe they share state when they do not. "
+                "Install it with: pip install '.[postgres]'"
+            ) from None
+        logger.warning(
+            "[DB] psycopg2 not installed (auto backend); trying supabase. "
+            "Install with: pip install '.[postgres]'"
+        )
         return get_supabase_client(config)
     except Exception as e:
-        print(f"[DB] Postgres connection failed: {e}, fallback to SQLite")
+        if explicit:
+            raise RuntimeError(
+                f"DATABASE_BACKEND=postgres was requested but the connection "
+                f"failed: {e}. Refusing to fall back to a local file. Check "
+                "DATABASE_URL and that the server is reachable."
+            ) from e
+        logger.warning("[DB] Postgres connection failed: %s; falling back to SQLite", e)
         return get_sqlite_connection(config)
 
 
@@ -121,15 +169,38 @@ def get_supabase_client(config: Optional[DatabaseConfig] = None):
     if config is None:
         config = get_config()
     
+    explicit = _backend_is_explicit(config)
     try:
         from supabase import create_client
         if config.supabase_url and config.supabase_key:
             client = create_client(config.supabase_url, config.supabase_key)
             return client
+        if explicit:
+            raise RuntimeError(
+                "DATABASE_BACKEND=supabase was requested but SUPABASE_URL / "
+                "SUPABASE_ANON_KEY are not set. Refusing to fall back to a "
+                "local file, because cloud sync would silently not happen."
+            )
     except ImportError:
-        print("[DB] supabase-py not installed")
+        if explicit:
+            raise RuntimeError(
+                "DATABASE_BACKEND=supabase was requested but supabase-py is not "
+                "installed. Refusing to fall back to a local file. Install it "
+                "with: pip install '.[supabase]'"
+            ) from None
+        logger.warning(
+            "[DB] supabase-py not installed (auto backend); using a local file. "
+            "Install with: pip install '.[supabase]'"
+        )
+    except RuntimeError:
+        raise
     except Exception as e:
-        print(f"[DB] Supabase client failed: {e}")
+        if explicit:
+            raise RuntimeError(
+                f"DATABASE_BACKEND=supabase was requested but the client failed "
+                f"to initialise: {e}. Refusing to fall back to a local file."
+            ) from e
+        logger.warning("[DB] Supabase client failed: %s; using a local file", e)
     
     return get_sqlite_connection(config)
 

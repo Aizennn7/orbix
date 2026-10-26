@@ -7,11 +7,35 @@
   "backtest_window": 2500,
   "candles_archived": 0,
   "database_bytes": 12288,
+  "database_config": {
+    "backend": "duckdb",
+    "configured_backend": "auto",
+    "data_dir": "data",
+    "database_url_configured": false,
+    "duckdb_path": "candles.duckdb",
+    "is_postgres": false,
+    "is_supabase": false,
+    "mobile_data_dir": "mobile",
+    "sqlite_path": "orbix.sqlite3",
+    "supabase_configured": false
+  },
+  "database_health": {
+    "backend": "duckdb",
+    "data_dir": "data",
+    "data_dir_exists": true,
+    "duckdb_exists": true,
+    "duckdb_ok": true,
+    "mobile_dir_exists": true,
+    "postgres_configured": false,
+    "sqlite_exists": true,
+    "sqlite_ok": true,
+    "supabase_configured": false
+  },
   "datasets": [],
   "datasets_archived": 0,
   "engine": "DuckDB",
   "model_training_window": 5000,
-  "path": "/tmp/orbix-preview/candles.duckdb",
+  "path": "candles.duckdb",
   "signal_window_limit": 720,
   "tail_rows": 10000
 }

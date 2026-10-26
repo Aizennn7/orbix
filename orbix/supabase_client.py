@@ -5,9 +5,12 @@ Free tier: 500MB, enough for M1 candles
 """
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import List, Optional
+
+logger = logging.getLogger(__name__)
 
 try:
     from supabase import create_client, Client
@@ -31,7 +34,7 @@ class SupabaseSync:
                 self.client = create_client(self.url, self.key)
                 self.enabled = True
             except Exception as e:
-                print(f"[Supabase] Failed to init: {e}")
+                logger.warning("[Supabase] Failed to init: %s", e)
                 self.enabled = False
 
     def is_enabled(self) -> bool:
@@ -47,7 +50,7 @@ class SupabaseSync:
             self.client.table("candles").select("id").limit(1).execute()
             return True
         except Exception:
-            print("[Supabase] Tables not created yet - run SQL in dashboard")
+            logger.info("[Supabase] Tables not created yet - run SQL in dashboard")
             return False
 
     def sync_candles(self, candles: List[dict]) -> int:
@@ -59,7 +62,7 @@ class SupabaseSync:
             result = self.client.table("candles").upsert(candles, on_conflict="dataset_id,timestamp").execute()
             return len(result.data) if result.data else 0
         except Exception as e:
-            print(f"[Supabase] Sync candles failed: {e}")
+            logger.warning("[Supabase] Sync candles failed: %s", e)
             return 0
 
     def sync_signals(self, signals: List[dict]) -> int:
@@ -70,7 +73,7 @@ class SupabaseSync:
             result = self.client.table("signals").upsert(signals, on_conflict="signal_id").execute()
             return len(result.data) if result.data else 0
         except Exception as e:
-            print(f"[Supabase] Sync signals failed: {e}")
+            logger.warning("[Supabase] Sync signals failed: %s", e)
             return 0
 
     def fetch_candles(self, dataset_id: str, limit: int = 500) -> List[dict]:
@@ -81,7 +84,7 @@ class SupabaseSync:
             result = self.client.table("candles").select("*").eq("dataset_id", dataset_id).order("timestamp", desc=False).limit(limit).execute()
             return result.data or []
         except Exception as e:
-            print(f"[Supabase] Fetch failed: {e}")
+            logger.warning("[Supabase] Fetch failed: %s", e)
             return []
 
 

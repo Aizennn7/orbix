@@ -6,6 +6,7 @@ Same API for the desktop (Electron) and mobile clients
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import threading
 from datetime import datetime, timezone
@@ -14,14 +15,22 @@ from typing import List, Optional
 
 from .domain import Candle, parse_datetime
 
+logger = logging.getLogger(__name__)
+
 # Root level database config - single source of truth
 try:
     from database import get_database_config
     _root_config = get_database_config()
-    print(f"[MobileDB] Using root config: { _root_config.data_dir} backend={_root_config.effective_backend.value}")
+    logger.info(
+        "[MobileDB] Using root config: %s backend=%s",
+        _root_config.data_dir,
+        _root_config.effective_backend.value,
+    )
 except Exception as e:
     _root_config = None
-    print(f"[MobileDB] Root config not available: {e}, using local")
+    # Loud, not silent: falling back to a local store means the mobile client
+    # and the server are no longer reading the same data directory.
+    logger.warning("[MobileDB] Root config not available: %s; using local", e)
 
 
 class MobileCandleStore:

@@ -15,6 +15,21 @@ dependencies = [
   "numpy>=1.26,<3",
 ]
 
+# The Postgres and Supabase backends are imported lazily inside
+# database/connection.py and orbix/supabase_client.py, and both call sites catch
+# ImportError and fall back to DuckDB/SQLite. That fallback is convenient for a
+# laptop but dangerous in production: an undeclared driver means a server that
+# was told DATABASE_BACKEND=postgres quietly runs on a local file instead of
+# failing loudly. Declare them as extras so the intent is explicit and
+# `pip install .[postgres]` actually yields a working Postgres backend.
+[project.optional-dependencies]
+postgres = ["psycopg2-binary>=2.9,<3"]
+supabase = ["supabase>=2.5.0"]
+# Test tooling. The suite is stdlib unittest driven by pytest; it does not use
+# httpx or fastapi.testclient (it exercises the app through a real socket).
+dev = ["pytest>=8.0"]
+all = ["psycopg2-binary>=2.9,<3", "supabase>=2.5.0"]
+
 [tool.setuptools.packages.find]
 # database/ is imported by orbix.runtime for backend selection, so it must ship
 # with the package or an installed Orbix silently falls back to the legacy

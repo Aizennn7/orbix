@@ -7,9 +7,10 @@ name: Deploy static snapshot to GitHub Pages
 on:
   push:
     branches:
+      # Only main. This used to also list per-session arena/* branches, which
+      # meant a Pages deploy could be triggered by a branch that no longer
+      # exists and could race a deploy from main for the same artifact.
       - main
-      - arena/7b0574e1-orbix
-      - arena/6260349f-orbix
     paths:
       - "docs/**"
       - ".github/workflows/pages.yml"
