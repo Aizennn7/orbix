@@ -1,9 +1,10 @@
 """
 Orbix Database Connection - Root Level Factory
-Single entry point for all database connections across web, mobile, laptop, APK
+Single entry point for all database connections across the web and mobile clients
 """
 from __future__ import annotations
 
+import logging
 import os
 import sqlite3
 import threading
@@ -12,10 +13,26 @@ from typing import Optional, Union
 
 from .config import DatabaseConfig, DatabaseBackend, get_config, get_database_config
 
+logger = logging.getLogger(__name__)
+
 # Lazy imports - only import when needed
 _candle_store_cache = {}
 _ledger_cache = {}
 _lock = threading.RLock()
+
+
+def _backend_is_explicit(config: DatabaseConfig) -> bool:
+    """True when the operator named a backend instead of leaving it on ``auto``.
+
+    The distinction decides whether a missing driver may fall back. Under
+    ``auto`` the fallback chain *is* the feature: pick the best backend that
+    this machine can actually open. But when someone wrote
+    ``DATABASE_BACKEND=postgres``, silently handing them a local SQLite file
+    means two servers believe they share state when they do not. That is the
+    same failure mode as a swallowed ImportError in the Docker build, so it
+    raises instead.
+    """
+    return config.backend != DatabaseBackend.AUTO
 
 
 def get_connection(backend: Optional[Union[str, DatabaseBackend]] = None, config: Optional[DatabaseConfig] = None):
@@ -75,8 +92,22 @@ def get_duckdb_connection(config: Optional[DatabaseConfig] = None):
     try:
         import duckdb
     except ImportError:
-        # Fallback to SQLite if DuckDB not available (e.g., APK)
-        print("[DB] DuckDB not available, fallback to SQLite")
+        # DuckDB is a declared hard dependency (pyproject.toml and
+        # requirements.txt), so its absence means a broken install rather than a
+        # platform that legitimately lacks it. Same rule as the Postgres and
+        # Supabase paths: an explicit request fails loudly, auto-detection warns
+        # and falls back.
+        if _backend_is_explicit(config):
+            raise RuntimeError(
+                "DATABASE_BACKEND=duckdb was requested but duckdb is not "
+                "installed. Refusing to fall back to SQLite, because the candle "
+                "store would silently change engine. Reinstall dependencies "
+                "with: pip install -r requirements.txt"
+            ) from None
+        logger.warning(
+            "[DB] DuckDB not available (auto backend); falling back to SQLite. "
+            "Reinstall dependencies with: pip install -r requirements.txt"
+        )
         return get_sqlite_connection(config)
     
     db_path = config.duckdb_path
@@ -95,6 +126,7 @@ def get_postgres_connection(config: Optional[DatabaseConfig] = None):
         # Fallback
         return get_sqlite_connection(config)
     
+    explicit = _backend_is_explicit(config)
     try:
         import psycopg2
         from psycopg2.extras import RealDictCursor
@@ -109,10 +141,26 @@ def get_postgres_connection(config: Optional[DatabaseConfig] = None):
         conn = psycopg2.connect(dsn, cursor_factory=RealDictCursor)
         return conn
     except ImportError:
-        print("[DB] psycopg2 not installed, trying supabase")
+        if explicit:
+            raise RuntimeError(
+                "DATABASE_BACKEND=postgres was requested but psycopg2 is not "
+                "installed. Refusing to fall back to a local file, because two "
+                "servers would then believe they share state when they do not. "
+                "Install it with: pip install '.[postgres]'"
+            ) from None
+        logger.warning(
+            "[DB] psycopg2 not installed (auto backend); trying supabase. "
+            "Install with: pip install '.[postgres]'"
+        )
         return get_supabase_client(config)
     except Exception as e:
-        print(f"[DB] Postgres connection failed: {e}, fallback to SQLite")
+        if explicit:
+            raise RuntimeError(
+                f"DATABASE_BACKEND=postgres was requested but the connection "
+                f"failed: {e}. Refusing to fall back to a local file. Check "
+                "DATABASE_URL and that the server is reachable."
+            ) from e
+        logger.warning("[DB] Postgres connection failed: %s; falling back to SQLite", e)
         return get_sqlite_connection(config)
 
 
@@ -121,15 +169,38 @@ def get_supabase_client(config: Optional[DatabaseConfig] = None):
     if config is None:
         config = get_config()
     
+    explicit = _backend_is_explicit(config)
     try:
         from supabase import create_client
         if config.supabase_url and config.supabase_key:
             client = create_client(config.supabase_url, config.supabase_key)
             return client
+        if explicit:
+            raise RuntimeError(
+                "DATABASE_BACKEND=supabase was requested but SUPABASE_URL / "
+                "SUPABASE_ANON_KEY are not set. Refusing to fall back to a "
+                "local file, because cloud sync would silently not happen."
+            )
     except ImportError:
-        print("[DB] supabase-py not installed")
+        if explicit:
+            raise RuntimeError(
+                "DATABASE_BACKEND=supabase was requested but supabase-py is not "
+                "installed. Refusing to fall back to a local file. Install it "
+                "with: pip install '.[supabase]'"
+            ) from None
+        logger.warning(
+            "[DB] supabase-py not installed (auto backend); using a local file. "
+            "Install with: pip install '.[supabase]'"
+        )
+    except RuntimeError:
+        raise
     except Exception as e:
-        print(f"[DB] Supabase client failed: {e}")
+        if explicit:
+            raise RuntimeError(
+                f"DATABASE_BACKEND=supabase was requested but the client failed "
+                f"to initialise: {e}. Refusing to fall back to a local file."
+            ) from e
+        logger.warning("[DB] Supabase client failed: %s; using a local file", e)
     
     return get_sqlite_connection(config)
 
@@ -149,16 +220,62 @@ def get_candle_store(config: Optional[DatabaseConfig] = None, backend: Optional[
             pass
     
     effective = config.effective_backend
-    cache_key = f"{effective.value}:{config.data_dir}"
+    # Key on the files that will actually be opened, not on data_dir. Keying on
+    # data_dir let the key and the target diverge: two configs with different
+    # data_dir values but stale derived paths produced two cache entries bound
+    # to the same physical database.
+    cache_key = "{}:{}:{}:{}".format(
+        effective.value,
+        config.duckdb_path,
+        config.sqlite_candles_path,
+        config.mobile_candles_db,
+    )
     
     with _lock:
-        if cache_key in _candle_store_cache:
-            return _candle_store_cache[cache_key]
+        cached = _candle_store_cache.get(cache_key)
+        if cached is not None:
+            stale = getattr(cached, "closed", False)
+            if not stale:
+                # Nor one whose database file has disappeared.
+                #
+                # CandleStore opens a single DuckDB connection in __init__ and
+                # reuses it at every one of its query sites, so it cannot
+                # re-create its directory on demand the way the SQLite stores
+                # do. If the data directory is removed at runtime - a volume
+                # remount, a cleanup job - the open handle keeps writing to an
+                # unlinked inode. Nothing raises, and every candle written after
+                # that point is silently discarded when the process exits. That
+                # is worse than the SQLite failure mode, because it looks like
+                # success. Rebuilding is the only route back to durable writes.
+                db_file = getattr(cached, "database", None)
+                if db_file is not None and not Path(db_file).exists():
+                    logger.warning(
+                        "[DB] candle store file %s disappeared; closing the stale "
+                        "handle and rebuilding. Candles written to it since the "
+                        "directory vanished are lost.",
+                        db_file,
+                    )
+                    stale = True
+            if stale:
+                # Never hand back a closed or orphaned store: the caller would
+                # get a dead DuckDB connection, or one writing to nothing. Drop
+                # the entry and fall through to rebuild it.
+                closer = getattr(cached, "close", None)
+                if callable(closer):
+                    try:
+                        closer()
+                    except Exception:
+                        logger.warning(
+                            "[DB] failed to close a stale candle store", exc_info=True
+                        )
+                _candle_store_cache.pop(cache_key, None)
+            else:
+                return cached
         
         if effective == DatabaseBackend.SQLITE or config.is_postgres or config.is_supabase:
             # For SQLite backend, use MobileCandleStore or SQLite version
             # Check if mobile mode
-            if os.environ.get("ORBIX_MOBILE") or os.environ.get("ORBIX_APK") or "mobile" in str(config.data_dir):
+            if os.environ.get("ORBIX_MOBILE") or "mobile" in str(config.data_dir):
                 from orbix.mobile_db import MobileCandleStore
                 store = MobileCandleStore(config.mobile_candles_db if hasattr(config, 'mobile_candles_db') else config.sqlite_candles_path)
             else:
@@ -194,11 +311,19 @@ def get_ledger(config: Optional[DatabaseConfig] = None, backend: Optional[str] =
         except ValueError:
             pass
     
-    cache_key = f"ledger:{config.data_dir}"
+    # Key on the resolved files, for the same reason as get_candle_store().
+    cache_key = "ledger:{}:{}".format(config.sqlite_path, config.mobile_ledger_db)
     
     with _lock:
-        if cache_key in _ledger_cache:
-            return _ledger_cache[cache_key]
+        cached = _ledger_cache.get(cache_key)
+        if cached is not None:
+            # Same guard as get_candle_store(): a closed ledger is rebuilt
+            # rather than returned. Ledgers have no close() today, so this is
+            # defensive - getattr keeps it correct if one is added later.
+            if getattr(cached, "closed", False):
+                _ledger_cache.pop(cache_key, None)
+            else:
+                return cached
         
         effective = config.effective_backend
         
@@ -218,7 +343,7 @@ def get_ledger(config: Optional[DatabaseConfig] = None, backend: Optional[str] =
 
 
 def get_mobile_store(config: Optional[DatabaseConfig] = None):
-    """Get mobile stores - for APK, all inside"""
+    """Get the mobile client stores."""
     if config is None:
         config = get_config()
     
@@ -285,7 +410,7 @@ def init_database(config: Optional[DatabaseConfig] = None) -> dict:
         # Mobile DB
         try:
             candle_store, ledger = get_mobile_store(config)
-            result["tables"].append("mobile: SQLite inside APK")
+            result["tables"].append("mobile: SQLite")
         except Exception as e:
             result["tables"].append(f"mobile: failed {e}")
         

@@ -11,14 +11,14 @@
     "enabled": true,
     "last_cursor": null,
     "last_entry_time": null,
-    "latest_entry": "2026-10-20T08:57:00Z",
+    "latest_entry": "2026-10-26T08:26:00Z",
     "learned": 0,
     "note": "One test-before-learn update per completed bar, whether or not a signal was delivered. These are not paper trades and are excluded from win rate and Telegram.",
     "resolved": 0,
     "scored": 0,
     "total": 0
   },
-  "dataset_id": "0da1e25a50f831bbc39ddc1775f3c02f8d505800310d76ae58eda703e4fffe18",
+  "dataset_id": "eca56906b9749250506cf44bbd5a16e83041ca06407edce44d01235f33cf5b51",
   "drift": {
     "state": "untracked"
   },
@@ -36,10 +36,10 @@
     "calibration_flat": false,
     "contributions": [
       {
-        "contribution": 0.1644,
+        "contribution": 0.1832,
         "feature": "hour_cos",
         "label": "Hour of day (cos)",
-        "value": -3.2874,
+        "value": -3.6645,
         "weight": -0.05
       },
       {
@@ -79,8 +79,8 @@
       }
     ],
     "ensemble_members": 0,
-    "probability_up": 0.7357971030578221,
-    "raw_probability": 0.7357971030578221,
+    "probability_up": 0.7368522520987695,
+    "raw_probability": 0.7368522520987695,
     "uncertainty": null
   },
   "prequential": null,
@@ -103,6 +103,6 @@
   "trained_at": null,
   "training_samples": 693,
   "uncertainty_limit": 0.1,
-  "validation_log_loss": 0.7440501365129302,
+  "validation_log_loss": 0.7441796484355315,
   "versions": []
 }

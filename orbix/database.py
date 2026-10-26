@@ -1,7 +1,7 @@
 """
 Orbix Database - Root Level Re-export
 This file re-exports from database/ at root level for easy import
-All database config lives at root level, shared by web, mobile, laptop, APK
+All database config lives at root level, shared by the web and mobile clients
 
 Usage:
     from orbix.database import get_database_config, get_candle_store, get_ledger
@@ -12,8 +12,11 @@ Both work, but database/ at root is canonical
 """
 from __future__ import annotations
 
+import logging
 import sys
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # Ensure root database/ is importable
 ROOT = Path(__file__).resolve().parents[1]
@@ -40,8 +43,17 @@ try:
         get_supabase_client,
     )
 except ImportError as e:
-    # Fallback if database/ not found (should not happen)
-    print(f"[orbix.database] Failed to import from root database/: {e}")
+    # Fallback if database/ not found (should not happen). This is the exact
+    # failure mode that let a Docker image missing database/ ship silently: the
+    # ImportError was swallowed and callers got the legacy stores instead. It is
+    # logged at ERROR so a degraded install is visible in the process log rather
+    # than looking like a normal startup.
+    logger.error(
+        "[orbix.database] Failed to import from root database/: %s. "
+        "Backend selection will fall back to the legacy stores. Ensure the "
+        "database/ package ships with the install (see pyproject.toml include).",
+        e,
+    )
     # Provide minimal fallback
     from pathlib import Path as _Path
     ROOT = _Path(__file__).resolve().parents[1]

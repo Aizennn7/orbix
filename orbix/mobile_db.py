@@ -1,11 +1,12 @@
 """
-Orbix Mobile Database Adapter - SQLite for APK, works offline
+Orbix Mobile Database Adapter - SQLite store for the mobile client, works offline
 Replaces DuckDB for mobile where native libs unavailable
-Supports both laptop (Electron) and mobile (Capacitor) with same API
+Same API for the desktop (Electron) and mobile clients
 """
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import threading
 from datetime import datetime, timezone
@@ -13,31 +14,51 @@ from pathlib import Path
 from typing import List, Optional
 
 from .domain import Candle, parse_datetime
+from .storage_guard import ensure_parent
+
+logger = logging.getLogger(__name__)
 
 # Root level database config - single source of truth
 try:
     from database import get_database_config
     _root_config = get_database_config()
-    print(f"[MobileDB] Using root config: { _root_config.data_dir} backend={_root_config.effective_backend.value}")
+    logger.info(
+        "[MobileDB] Using root config: %s backend=%s",
+        _root_config.data_dir,
+        _root_config.effective_backend.value,
+    )
 except Exception as e:
     _root_config = None
-    print(f"[MobileDB] Root config not available: {e}, using local")
+    # Loud, not silent: falling back to a local store means the mobile client
+    # and the server are no longer reading the same data directory.
+    logger.warning("[MobileDB] Root config not available: %s; using local", e)
 
 
 class MobileCandleStore:
-    """SQLite-backed candle store for mobile APK - offline first"""
+    """SQLite-backed candle store for the mobile client - offline first"""
 
     def __init__(self, database: str | Path):
         self.database = Path(database)
+        self._reviving = False
         self.database.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
+        revived = ensure_parent(self.database, "MobileCandleStore")
         conn = sqlite3.connect(str(self.database), check_same_thread=False)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL;")
         conn.execute("PRAGMA synchronous=NORMAL;")
+        if revived and not self._reviving:
+            # Directory restored, database file not: this connection points at
+            # an empty file. Rebuild the schema before it is used. _lock is an
+            # RLock and _initialize() re-enters it on this same thread.
+            self._reviving = True
+            try:
+                self._initialize()
+            finally:
+                self._reviving = False
         return conn
 
     def _initialize(self) -> None:
@@ -202,14 +223,24 @@ class MobileLedger:
 
     def __init__(self, database: str | Path):
         self.database = Path(database)
+        self._reviving = False
         self.database.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
+        revived = ensure_parent(self.database, "MobileLedger")
         conn = sqlite3.connect(str(self.database), check_same_thread=False)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL;")
+        if revived and not self._reviving:
+            # Directory restored, database file not: rebuild the schema so the
+            # caller gets tables rather than "no such table". See PaperLedger.
+            self._reviving = True
+            try:
+                self._initialize()
+            finally:
+                self._reviving = False
         return conn
 
     def _initialize(self) -> None:
@@ -313,7 +344,7 @@ class MobileLedger:
 
 
 def get_mobile_store(data_dir: Path) -> tuple[MobileCandleStore, MobileLedger]:
-    """Factory for mobile stores - single entry point for APK"""
+    """Factory for the mobile client stores."""
     data_dir = Path(data_dir)
     data_dir.mkdir(parents=True, exist_ok=True)
     candle_db = data_dir / "mobile_candles.db"

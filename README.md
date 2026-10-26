@@ -109,9 +109,9 @@ PORT=10000 ORBIX_DATA_DIR=/var/lib/orbix bash startup.sh
 
 Point the platform's health check at `/healthz` and keep the data directory on a real disk.
 
-### Database — Root Level Configuration (NEW)
+### Database — Root Level Configuration
 
-**All database config at root level — single source of truth for web, mobile, laptop, APK**
+**All database config at root level — single source of truth for the web and mobile clients**
 
 ```
 orbix/ (root)
@@ -119,12 +119,12 @@ orbix/ (root)
 │   ├── config.py          # Central config - reads .env at root
 │   ├── connection.py      # Connection factory - auto backend
 │   ├── schema.sql         # Postgres/Supabase schema
-│   ├── sqlite_schema.sql  # SQLite schema (mobile, offline)
+│   ├── sqlite_schema.sql  # SQLite schema (offline)
 │   └── README.md
-├── data/                  # <-- ROOT LEVEL DATA
+├── data/                  # <-- ROOT LEVEL DATA (gitignored)
 │   ├── orbix.sqlite3      # SQLite ledger
 │   ├── candles.duckdb     # DuckDB candles
-│   └── mobile/            # APK data - all inside
+│   └── mobile/            # Mobile client store
 ├── .env                   # DATABASE_BACKEND, DATABASE_URL, SUPABASE_URL at root
 └── DATABASE.md            # Full guide
 ```
@@ -134,7 +134,7 @@ Configure at root `.env`:
 DATABASE_BACKEND=auto              # auto, sqlite, duckdb, postgres, supabase
 ORBIX_DATA_DIR=./data              # root data dir
 DATABASE_URL=postgres://...        # optional Postgres
-SUPABASE_URL=https://xxx.supabase.co  # optional cloud sync for APK
+SUPABASE_URL=https://xxx.supabase.co  # optional cloud sync
 ```
 
 Usage:
@@ -150,40 +150,33 @@ Init: `python scripts/init_db.py --check` or `python scripts/init_db.py`
 
 See `DATABASE.md` and `database/README.md` for full guide.
 
-### Mobile & Laptop — All Orbix inside APK
+### Mobile & Desktop clients
 
-**New in 0.4.0-mobile: Full offline APK with database at root level, works 24/7 on your device**
+Orbix ships three clients, all reading the same root database configuration:
 
-Orbix now ships as:
-- **Mobile APK** (`mobile/`): Capacitor + Chaquopy Python, SQLite inside APK, 5 strategies JS port, offline-first, WorkManager 15min + BootReceiver for 24/7
-- **Laptop App** (`electron/`): Electron + Python backend, tray, same SQLite, keyboard shortcuts Ctrl+1..5
-- **PWA**: `web/manifest.json` + `service-worker.js` - installable, offline cache, bottom nav on mobile
+- **Dashboard** (`web/`): the primary FastAPI-served UI.
+- **Mobile PWA** (`mobile/`): Vite build, IndexedDB cache, offline-capable, bottom nav and 44px touch targets.
+- **Desktop** (`electron/`): Electron shell around the dashboard, tray and Ctrl+1..5 shortcuts.
 
-All Orbix data lives inside app: `datasets`, `candles` (M1), `signals`, `settings`, `learning` - SQLite (native) or IndexedDB (web fallback). No server needed.
+The mobile client caches `datasets`, `candles` (M1), `signals` and `settings` in IndexedDB and optionally syncs to Supabase when the server has it configured.
 
 ```bash
-# Build mobile & laptop interfaces
+# Build the mobile PWA into mobile/dist (a gitignored build artifact)
 ./scripts/build_mobile.sh
 
-# Build APK (needs Android Studio + Java 17)
-./scripts/build_apk.sh
-# APK: mobile/android/app/build/outputs/apk/debug/app-debug.apk
-# Contains: all web UI + all Python (via Chaquopy) + SQLite DB + 24/7 worker
-
-# Laptop
+# Desktop
 cd electron && npm install && npm start        # dev
 npm run build                                   # AppImage, deb, dmg, exe
 
-# PWA local (no Android SDK needed)
+# Serve a built PWA locally
 npx serve mobile/dist
-# -> http://localhost:3000 - offline with IndexedDB
 ```
 
-Mobile UI: bottom nav (Dash, Engine, Paper, Data, Trader), swipe gestures, 44px touch targets, offline badge, local notifications. Laptop UI: top nav, hover states, multi-column, tray.
+Credentials are never baked into a client bundle. The mobile PWA resolves its
+configuration at runtime from `/api/database/config`, so only the Supabase
+`anon` key is ever exposed to a browser. Keep the `service_role` key on the
+server.
 
-Database inside APK: `/data/data/com.orbix.signallab/files/orbix_data/` (APK), `~/Library/Application Support/Orbix/` (laptop), `./mobile_data/` (web). Works offline, syncs to Supabase when online (optional, free tier 500MB).
-
-See `docs/MOBILE.md` and `mobile/README.md` for full build guide.
 
 ## Run it without live credentials
 

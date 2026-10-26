@@ -1,5 +1,5 @@
 -- Orbix SQLite Schema - Root Level - For Mobile, Laptop, Offline
--- All Orbix data inside SQLite, works everywhere, APK, Electron, web
+-- All Orbix data inside SQLite, works everywhere
 -- This is the default backend, configured at root level
 
 -- Datasets
@@ -158,7 +158,7 @@ CREATE TABLE IF NOT EXISTS settings (
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- Sync queue - offline-first APK
+-- Sync queue - offline-first clients
 CREATE TABLE IF NOT EXISTS sync_queue (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     table_name TEXT NOT NULL,

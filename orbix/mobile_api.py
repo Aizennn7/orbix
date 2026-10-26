@@ -1,9 +1,10 @@
 """
-Orbix Mobile API - Offline-first API for APK
+Orbix Mobile API - offline-first API for the mobile client
 Works without server, uses local SQLite, syncs to Supabase when online
 """
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import Optional
@@ -15,14 +16,22 @@ from fastapi.staticfiles import StaticFiles
 
 from .mobile_db import get_mobile_store
 
+logger = logging.getLogger(__name__)
+
 # Root level database config - single source of truth
 try:
     from database import get_database_config, get_config
     _root_db_config = get_database_config()
-    print(f"[MobileAPI] Root DB config: backend={_root_db_config.effective_backend.value} data_dir={_root_db_config.data_dir}")
+    logger.info(
+        "[MobileAPI] Root DB config: backend=%s data_dir=%s",
+        _root_db_config.effective_backend.value,
+        _root_db_config.data_dir,
+    )
 except Exception as e:
     _root_db_config = None
-    print(f"[MobileAPI] Root config not available: {e}")
+    # Loud, not silent: with no root config the mobile API serves a different
+    # data directory from the server, so the two clients stop agreeing.
+    logger.warning("[MobileAPI] Root config not available: %s", e)
 
 # Also try orbix.database re-export
 try:
@@ -43,7 +52,7 @@ mobile_app.add_middleware(
     allow_headers=["*"],
 )
 
-# Data dir for mobile - in APK this will be app's private storage
+# Data dir for the mobile client
 MOBILE_DATA_DIR = Path(os.environ.get("ORBIX_MOBILE_DATA_DIR", "./mobile_data"))
 candle_store, ledger = get_mobile_store(MOBILE_DATA_DIR)
 

@@ -48,7 +48,7 @@
       "high": 1.0886214001494579,
       "low": 1.0880274313822806,
       "open": 1.088147560770084,
-      "timestamp": "2026-10-20T08:56:00Z",
+      "timestamp": "2026-10-26T08:25:00Z",
       "volume": 319.0
     },
     "live": false,
@@ -81,23 +81,22 @@
     "single_pair_rule": "Only the active pair is analysed so the gate never mixes two candle streams. Switch pairs by importing that pair's CSV from the Data page.",
     "why": "Deepest FX pair in the BIS Triennial Survey; tightest typical spread."
   },
-  "generated_at": "2026-10-20T09:07:07.799798Z",
+  "generated_at": "2026-10-26T08:27:47.621589Z",
   "readiness": {
     "ready": false,
     "reasons": [
       "No server-side market provider is configured (ORBIX_TWELVE_DATA_API_KEY).",
       "The active dataset is not the provider feed.",
-      "The latest completed bar is older than the freshness limit.",
       "News risk is not clear: UNAVAILABLE."
     ]
   },
   "replay": [
     {
       "direction": "\u2014",
-      "entry_time": "2026-10-20T08:52:00Z",
-      "prediction_time": "2026-10-20T08:53:00Z",
+      "entry_time": "2026-10-26T08:21:00Z",
+      "prediction_time": "2026-10-26T08:22:00Z",
       "probability_calibrated": false,
-      "probability_up": 0.6920034751760781,
+      "probability_up": 0.6930961851560874,
       "reason": "Orbix Confluence Gate abstains: strongest side passed 2/6 checks; at least 5/6 plus trend and ADX alignment are required.",
       "replayed": true,
       "side": "NO SIGNAL",
@@ -105,10 +104,10 @@
     },
     {
       "direction": "\u2014",
-      "entry_time": "2026-10-20T08:53:00Z",
-      "prediction_time": "2026-10-20T08:54:00Z",
+      "entry_time": "2026-10-26T08:22:00Z",
+      "prediction_time": "2026-10-26T08:23:00Z",
       "probability_calibrated": false,
-      "probability_up": 0.5176150020516657,
+      "probability_up": 0.5189113450341934,
       "reason": "Orbix Confluence Gate abstains: strongest side passed 2/6 checks; at least 5/6 plus trend and ADX alignment are required.",
       "replayed": true,
       "side": "NO SIGNAL",
@@ -116,10 +115,10 @@
     },
     {
       "direction": "\u2014",
-      "entry_time": "2026-10-20T08:54:00Z",
-      "prediction_time": "2026-10-20T08:55:00Z",
+      "entry_time": "2026-10-26T08:23:00Z",
+      "prediction_time": "2026-10-26T08:24:00Z",
       "probability_calibrated": false,
-      "probability_up": 0.46518418823912816,
+      "probability_up": 0.46649125094974164,
       "reason": "Orbix Confluence Gate abstains: strongest side passed 2/6 checks; at least 5/6 plus trend and ADX alignment are required.",
       "replayed": true,
       "side": "NO SIGNAL",
@@ -127,10 +126,10 @@
     },
     {
       "direction": "\u2014",
-      "entry_time": "2026-10-20T08:55:00Z",
-      "prediction_time": "2026-10-20T08:56:00Z",
+      "entry_time": "2026-10-26T08:24:00Z",
+      "prediction_time": "2026-10-26T08:25:00Z",
       "probability_calibrated": false,
-      "probability_up": 0.5406186451294135,
+      "probability_up": 0.5419379241664454,
       "reason": "Orbix Confluence Gate abstains: strongest side passed 2/6 checks; at least 5/6 plus trend and ADX alignment are required.",
       "replayed": true,
       "side": "NO SIGNAL",
@@ -138,10 +137,10 @@
     },
     {
       "direction": "\u2014",
-      "entry_time": "2026-10-20T08:56:00Z",
-      "prediction_time": "2026-10-20T08:57:00Z",
+      "entry_time": "2026-10-26T08:25:00Z",
+      "prediction_time": "2026-10-26T08:26:00Z",
       "probability_calibrated": false,
-      "probability_up": 0.6112084557367387,
+      "probability_up": 0.6124847217993332,
       "reason": "Orbix Confluence Gate abstains: strongest side passed 3/6 checks; at least 5/6 plus trend and ADX alignment are required.",
       "replayed": true,
       "side": "NO SIGNAL",
@@ -149,10 +148,10 @@
     },
     {
       "direction": "CALL",
-      "entry_time": "2026-10-20T08:57:00Z",
-      "prediction_time": "2026-10-20T08:58:00Z",
+      "entry_time": "2026-10-26T08:26:00Z",
+      "prediction_time": "2026-10-26T08:27:00Z",
       "probability_calibrated": false,
-      "probability_up": 0.7357971030578221,
+      "probability_up": 0.7368522520987695,
       "reason": "Orbix Confluence Gate 6/6: trend, momentum, RSI band, directional ADX, candle quality, 20-bar breakout; raw model read 0.74 agrees (not yet calibrated). Rule score is not a calibrated probability.",
       "replayed": true,
       "side": "BUY",
@@ -164,50 +163,50 @@
   "windows": [
     {
       "direction": null,
-      "entry_time": "2026-10-20T09:08:00Z",
+      "entry_time": "2026-10-26T08:28:00Z",
       "index": 1,
       "note": "Not available until live data and the event calendar are ready.",
-      "prediction_time": "2026-10-20T09:09:00Z",
+      "prediction_time": "2026-10-26T08:29:00Z",
       "status": "BLOCKED"
     },
     {
       "direction": null,
-      "entry_time": "2026-10-20T09:09:00Z",
+      "entry_time": "2026-10-26T08:29:00Z",
       "index": 2,
       "note": "Not available until live data and the event calendar are ready.",
-      "prediction_time": "2026-10-20T09:10:00Z",
+      "prediction_time": "2026-10-26T08:30:00Z",
       "status": "BLOCKED"
     },
     {
       "direction": null,
-      "entry_time": "2026-10-20T09:10:00Z",
+      "entry_time": "2026-10-26T08:30:00Z",
       "index": 3,
       "note": "Not available until live data and the event calendar are ready.",
-      "prediction_time": "2026-10-20T09:11:00Z",
+      "prediction_time": "2026-10-26T08:31:00Z",
       "status": "BLOCKED"
     },
     {
       "direction": null,
-      "entry_time": "2026-10-20T09:11:00Z",
+      "entry_time": "2026-10-26T08:31:00Z",
       "index": 4,
       "note": "Not available until live data and the event calendar are ready.",
-      "prediction_time": "2026-10-20T09:12:00Z",
+      "prediction_time": "2026-10-26T08:32:00Z",
       "status": "BLOCKED"
     },
     {
       "direction": null,
-      "entry_time": "2026-10-20T09:12:00Z",
+      "entry_time": "2026-10-26T08:32:00Z",
       "index": 5,
       "note": "Not available until live data and the event calendar are ready.",
-      "prediction_time": "2026-10-20T09:13:00Z",
+      "prediction_time": "2026-10-26T08:33:00Z",
       "status": "BLOCKED"
     },
     {
       "direction": null,
-      "entry_time": "2026-10-20T09:13:00Z",
+      "entry_time": "2026-10-26T08:33:00Z",
       "index": 6,
       "note": "Not available until live data and the event calendar are ready.",
-      "prediction_time": "2026-10-20T09:14:00Z",
+      "prediction_time": "2026-10-26T08:34:00Z",
       "status": "BLOCKED"
     }
   ]

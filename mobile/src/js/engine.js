@@ -1,5 +1,5 @@
 /**
- * Orbix Signal Engine - JS Port for Mobile APK
+ * Orbix Signal Engine - JS port for the mobile PWA
  * All 5 strategies running offline, no Python needed
  * Based on orbix/strategies.py and orbix/engine.py
  */

@@ -1,13 +1,16 @@
 """
-Orbix Supabase Client - Optional cloud sync for APK with local DB
+Orbix Supabase Client - optional cloud sync alongside the local DB
 Local SQLite is primary, Supabase is secondary sync when online
 Free tier: 500MB, enough for M1 candles
 """
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import List, Optional
+
+logger = logging.getLogger(__name__)
 
 try:
     from supabase import create_client, Client
@@ -18,7 +21,7 @@ except ImportError:
 
 
 class SupabaseSync:
-    """Sync local APK SQLite DB to Supabase when online"""
+    """Sync the local SQLite DB to Supabase when online"""
 
     def __init__(self, url: Optional[str] = None, key: Optional[str] = None):
         self.url = url or os.environ.get("SUPABASE_URL")
@@ -31,7 +34,7 @@ class SupabaseSync:
                 self.client = create_client(self.url, self.key)
                 self.enabled = True
             except Exception as e:
-                print(f"[Supabase] Failed to init: {e}")
+                logger.warning("[Supabase] Failed to init: %s", e)
                 self.enabled = False
 
     def is_enabled(self) -> bool:
@@ -47,7 +50,7 @@ class SupabaseSync:
             self.client.table("candles").select("id").limit(1).execute()
             return True
         except Exception:
-            print("[Supabase] Tables not created yet - run SQL in dashboard")
+            logger.info("[Supabase] Tables not created yet - run SQL in dashboard")
             return False
 
     def sync_candles(self, candles: List[dict]) -> int:
@@ -59,7 +62,7 @@ class SupabaseSync:
             result = self.client.table("candles").upsert(candles, on_conflict="dataset_id,timestamp").execute()
             return len(result.data) if result.data else 0
         except Exception as e:
-            print(f"[Supabase] Sync candles failed: {e}")
+            logger.warning("[Supabase] Sync candles failed: %s", e)
             return 0
 
     def sync_signals(self, signals: List[dict]) -> int:
@@ -70,7 +73,7 @@ class SupabaseSync:
             result = self.client.table("signals").upsert(signals, on_conflict="signal_id").execute()
             return len(result.data) if result.data else 0
         except Exception as e:
-            print(f"[Supabase] Sync signals failed: {e}")
+            logger.warning("[Supabase] Sync signals failed: %s", e)
             return 0
 
     def fetch_candles(self, dataset_id: str, limit: int = 500) -> List[dict]:
@@ -81,13 +84,13 @@ class SupabaseSync:
             result = self.client.table("candles").select("*").eq("dataset_id", dataset_id).order("timestamp", desc=False).limit(limit).execute()
             return result.data or []
         except Exception as e:
-            print(f"[Supabase] Fetch failed: {e}")
+            logger.warning("[Supabase] Fetch failed: %s", e)
             return []
 
 
 # SQL to create tables in Supabase dashboard (SQL editor)
 SUPABASE_SQL = """
--- Run this in Supabase SQL editor to create tables for Orbix APK sync
+-- Run this in the Supabase SQL editor to create the Orbix sync tables
 
 create table if not exists datasets (
   dataset_id text primary key,
@@ -98,7 +101,7 @@ create table if not exists datasets (
   latest_timestamp timestamptz,
   created_at timestamptz default now(),
   updated_at timestamptz default now(),
-  source text default 'mobile-apk',
+  source text default 'mobile',
   user_id uuid references auth.users
 );
 
@@ -152,7 +155,7 @@ create policy "Users can manage own candles" on candles for all using (
 create policy "Users can manage own signals" on signals for all using (auth.uid() = user_id);
 create policy "Users can manage own settings" on settings for all using (auth.uid() = user_id);
 
--- For service key (bypass RLS) - APK with service key can write all
+-- The service_role key bypasses RLS and must stay on the server
 -- Use anon key with RLS for user-specific, service key for admin sync
 """
 

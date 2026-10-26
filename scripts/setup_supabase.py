@@ -2,7 +2,7 @@
 """
 Setup Supabase at Root Level - Interactive
 Configures database at root level for live and online (not offline)
-All config in root .env, shared by web, mobile APK, laptop
+All config in the root .env, shared by the web and mobile clients
 
 Usage:
   python scripts/setup_supabase.py              # interactive
@@ -45,7 +45,7 @@ def check_current():
     print()
     if cfg.is_supabase:
         print("✓ LIVE and ONLINE - Supabase configured at root")
-        print("  APK will sync to Supabase when online, offline DB as fallback")
+        print("  The mobile client syncs to Supabase when online, with a local DB as fallback")
     elif cfg.is_postgres:
         print("✓ LIVE and ONLINE - Postgres configured at root")
     else:
@@ -156,7 +156,7 @@ def setup_interactive():
         print("  1. python scripts/init_db.py --check")
         print("  2. uvicorn orbix.api:app --host 0.0.0.0 --port 8000 --workers 1")
         print("  3. Open forwarded port 8000 -> should show live online, not offline DB")
-        print("  4. For APK: ./scripts/build_mobile.sh + push to GitHub Actions -> APK will be live online")
+        print("  4. For the mobile PWA: ./scripts/build_mobile.sh")
     else:
         print("\n○ Still offline, check .env at root")
 

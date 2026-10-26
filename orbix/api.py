@@ -3,10 +3,13 @@ from __future__ import annotations
 import asyncio
 from concurrent.futures import ThreadPoolExecutor, wait
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from html import escape as html_escape
 import hmac
+import logging
 import os
 from pathlib import Path
+import shutil
 import tempfile
 from typing import Callable
 from urllib.parse import parse_qs, quote
@@ -45,10 +48,36 @@ from .strategies import strategy_catalog_payload
 from .telegram import TelegramError
 
 
+logger = logging.getLogger(__name__)
+
 ROOT = Path(__file__).resolve().parents[1]
 WEB_DIR = ROOT / "web"
-MAX_IMPORT_BYTES = 1024 * 1024 * 1024
-MAX_APPEND_BYTES = 64 * 1024 * 1024
+
+
+def _mb_env(name: str, default_mb: int) -> int:
+    """Read an upload cap in megabytes, falling back to a sane default.
+
+    The import cap used to be a hard-coded 1 GiB. At roughly 75 bytes per
+    one-minute candle that is ~14 million rows, or about 26 years of continuous
+    data - orders of magnitude past the largest window this app reads (backtest
+    2500, model training 5000, stored tail 10000). A cap that large is not a
+    limit, it is an invitation to fill the disk, so the default is now bounded
+    and operators who genuinely need more can raise it explicitly.
+    """
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default_mb * 1024 * 1024
+    try:
+        value = int(float(raw))
+    except ValueError:
+        return default_mb * 1024 * 1024
+    if value < 1:
+        return default_mb * 1024 * 1024
+    return value * 1024 * 1024
+
+
+MAX_IMPORT_BYTES = _mb_env("ORBIX_MAX_IMPORT_MB", 256)
+MAX_APPEND_BYTES = _mb_env("ORBIX_MAX_APPEND_MB", 64)
 
 # Load ORBIX root .env before Runtime or AutomationService read configuration.
 # Real process variables keep precedence, so `uvicorn --env-file` still works.
@@ -348,6 +377,22 @@ def _telegram_http_error(exc: TelegramError) -> HTTPException:
 async def _with_streamed_csv(request: Request, max_bytes: int, processor: Callable[[Path], dict]) -> dict:
     upload_root = runtime.data_dir / "tmp"
     upload_root.mkdir(parents=True, exist_ok=True)
+    # A byte cap bounds one request but not the filesystem. The stream is
+    # spooled to disk before it is parsed, and the parsed candles are then
+    # written to the store, so the same bytes cost roughly twice over. Refuse
+    # up front rather than filling the volume mid-write and leaving a truncated
+    # upload plus a corrupted store behind.
+    free_bytes = shutil.disk_usage(upload_root).free
+    required = max_bytes * 2
+    if free_bytes < required:
+        raise HTTPException(
+            status_code=507,
+            detail=(
+                "Not enough free disk space to accept this upload. "
+                f"Free up at least {(required - free_bytes) // (1024 * 1024)} MB "
+                "on the data volume and retry."
+            ),
+        )
     try:
         with tempfile.TemporaryDirectory(prefix="csv-upload-", dir=upload_root) as temp_dir:
             path = Path(temp_dir) / "candles.csv"
@@ -427,90 +472,25 @@ def storage_status() -> dict:
 
 @app.get("/api/database/config")
 def database_config() -> dict:
-    """Root level database config - single source of truth, permanent"""
+    """Root level database config - single source of truth"""
     try:
         from database import get_database_config
         cfg = get_database_config()
-        # Also check permanent APK config at root level
-        root = Path(__file__).resolve().parents[1]
-        apk_config = {}
-        apk_config_path = root / "database" / "apk_config.json"
-        if apk_config_path.exists():
-            import json
-            try:
-                apk_config = json.loads(apk_config_path.read_text())
-            except:
-                pass
         return {
             "status": "ok",
             "config": cfg.to_dict(),
-            "apk_config": apk_config,
             "root_level": True,
-            "permanent": True,
             "location": "database/ + data/ + .env at root - single source of truth",
             "data_dir": str(cfg.data_dir),
-            "note": "All data inside APK configured permanently at root level, shared by web, mobile, laptop, APK"
+            "note": "Database configuration is shared by the web and mobile clients."
         }
-    except Exception as e:
-        return {"status": "error", "error": str(e)}
-
-
-@app.get("/api/database/apk-config")
-def database_apk_config() -> dict:
-    """Permanent APK config at root level - all data inside APK configured at root"""
-    try:
-        root = Path(__file__).resolve().parents[1]
-        apk_config_path = root / "database" / "apk_config.json"
-        root_manifest_path = root / "database" / "root_manifest.json"
-        data_root_config_path = root / "data" / "root_config.json"
-        
-        import json
-        apk_config = {}
-        manifest = {}
-        data_config = {}
-        
-        if apk_config_path.exists():
-            apk_config = json.loads(apk_config_path.read_text())
-        if root_manifest_path.exists():
-            manifest = json.loads(root_manifest_path.read_text())
-        if data_root_config_path.exists():
-            data_config = json.loads(data_root_config_path.read_text())
-        
-        from database import get_database_config
-        cfg = get_database_config()
-        
-        return {
-            "status": "ok",
-            "config": apk_config,
-            "manifest": manifest,
-            "data_config": data_config,
-            "current": cfg.to_dict(),
-            "root_level": True,
-            "permanent": True,
-            "location": "database/apk_config.json at root - permanent APK config",
-            "note": "All data inside APK configured permanently at root level"
-        }
-    except Exception as e:
-        return {"status": "error", "error": str(e)}
-
-
-@app.get("/api/database/root-manifest")
-def database_root_manifest() -> dict:
-    """Root manifest - all data inside APK at root level"""
-    try:
-        root = Path(__file__).resolve().parents[1]
-        manifest_path = root / "database" / "root_manifest.json"
-        import json
-        if manifest_path.exists():
-            return {"status": "ok", "manifest": json.loads(manifest_path.read_text()), "permanent": True, "location": "database/root_manifest.json at root"}
-        return {"status": "error", "error": "Manifest not found, run scripts/configure_root_apk.py --build"}
     except Exception as e:
         return {"status": "error", "error": str(e)}
 
 
 @app.post("/api/database/config")
 async def database_config_update(request: Request) -> dict:
-    """Update root level Supabase config from mobile APK - makes live online"""
+    """Update the root Supabase config used by the web and mobile clients"""
     try:
         body = await request.json()
         url = body.get("supabase_url") or body.get("url") or ""
@@ -524,7 +504,7 @@ async def database_config_update(request: Request) -> dict:
         runtime_cfg_path = cfg.data_dir / "runtime_supabase.json"
         runtime_cfg_path.parent.mkdir(parents=True, exist_ok=True)
         import json
-        runtime_cfg_path.write_text(json.dumps({"supabase_url": url, "supabase_anon_key": key, "updated_at": __import__("datetime").datetime.utcnow().isoformat()}, indent=2))
+        runtime_cfg_path.write_text(json.dumps({"supabase_url": url, "supabase_anon_key": key, "updated_at": datetime.now(timezone.utc).isoformat()}, indent=2))
         # Also set env for current process
         os.environ["SUPABASE_URL"] = url
         os.environ["SUPABASE_ANON_KEY"] = key
@@ -541,7 +521,7 @@ async def database_config_update(request: Request) -> dict:
 
 @app.post("/api/database/sync")
 async def database_sync(request: Request) -> dict:
-    """Sync mobile APK data to root database (live when Supabase configured)"""
+    """Sync client data to the root database (live when Supabase is configured)"""
     try:
         body = await request.json()
         signals = body.get("signals", [])
@@ -562,15 +542,14 @@ async def database_sync(request: Request) -> dict:
                 pass
             # For now, save to local file as sync log
             import json
-            from datetime import datetime
             sync_log = cfg.data_dir / "mobile_sync.json"
             existing = []
             if sync_log.exists():
                 try:
                     existing = json.loads(sync_log.read_text())
-                except:
+                except (json.JSONDecodeError, OSError):
                     existing = []
-            existing.append({"at": datetime.utcnow().isoformat(), "signals": len(signals), "datasets": len(datasets), "candles": len(candles)})
+            existing.append({"at": datetime.now(timezone.utc).isoformat(), "signals": len(signals), "datasets": len(datasets), "candles": len(candles)})
             # Keep last 100
             existing = existing[-100:]
             sync_log.write_text(json.dumps(existing, indent=2))
@@ -578,14 +557,14 @@ async def database_sync(request: Request) -> dict:
             saved["datasets"] = len(datasets)
             saved["candles"] = len(candles)
         except Exception as e:
-            print(f"[Sync] Error: {e}")
+            logger.warning("[Sync] Error: %s", e)
         
         return {
             "status": "ok",
             "saved": saved,
             "backend": cfg.effective_backend.value,
             "is_live": cfg.is_supabase or cfg.is_postgres,
-            "message": f"Synced to {cfg.effective_backend.value} at root level - {'LIVE ONLINE' if cfg.is_supabase else 'offline local'} - permanent at root"
+            "message": f"Synced to {cfg.effective_backend.value} at root level - {'live' if cfg.is_supabase else 'offline local'}"
         }
     except Exception as e:
         return {"status": "error", "error": str(e)}

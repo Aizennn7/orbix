@@ -21,11 +21,11 @@
     "timezone": "UTC"
   },
   "clock": {
-    "data_time": "2026-10-20T08:57:00Z",
-    "lag_seconds": 607.6,
+    "data_time": "2026-10-26T08:26:00Z",
+    "lag_seconds": 107.5,
     "mode": "LIVE",
-    "reference": "2026-10-20T09:07:07.581082Z",
-    "server_time": "2026-10-20T09:07:07.581082Z",
+    "reference": "2026-10-26T08:27:47.519174Z",
+    "server_time": "2026-10-26T08:27:47.519174Z",
     "source": "SYNTHETIC DEMO"
   },
   "dataset_learning": {
@@ -35,7 +35,7 @@
     "enabled": true,
     "last_cursor": null,
     "last_entry_time": null,
-    "latest_entry": "2026-10-20T08:57:00Z",
+    "latest_entry": "2026-10-26T08:26:00Z",
     "learned": 0,
     "note": "One test-before-learn update per completed bar, whether or not a signal was delivered. These are not paper trades and are excluded from win rate and Telegram.",
     "resolved": 0,
@@ -56,9 +56,9 @@
     "grade_note": "Conviction is a label for distance from a coin flip plus ensemble agreement. It is not a probability of profit.",
     "losses_today": 0,
     "max_daily_losses": 100,
-    "next_open": "2026-10-20T12:30:00+00:00",
+    "next_open": "2026-10-26T12:30:00+00:00",
     "note": "Synthetic demo or no real dataset. Rules apply once real candles are loaded.",
-    "reference": "2026-10-20T09:07:07.581038+00:00",
+    "reference": "2026-10-26T08:27:47.519139+00:00",
     "rules": {
       "context_min_samples": 200,
       "context_min_win_rate": 0.4,
@@ -94,17 +94,17 @@
     "candles_added_last_sync": 0,
     "configured": false,
     "connected": false,
-    "data_fresh": false,
+    "data_fresh": true,
     "last_error": null,
     "last_success": null,
     "last_sync": null,
-    "latest_bar_age_seconds": 607.581038,
+    "latest_bar_age_seconds": 107.519139,
     "latest_candle": {
       "close": 1.0885012317170655,
       "high": 1.0886214001494579,
       "low": 1.0880274313822806,
       "open": 1.088147560770084,
-      "timestamp": "2026-10-20T08:56:00Z",
+      "timestamp": "2026-10-26T08:25:00Z",
       "volume": 319.0
     },
     "max_bar_age_seconds": 180,
@@ -118,7 +118,7 @@
   "paper_automation_note": null,
   "paper_automation_waiting": false,
   "recent_auto_signals": [],
-  "server_time": "2026-10-20T09:07:07.581038Z",
+  "server_time": "2026-10-26T08:27:47.519139Z",
   "strategy": "orbix_cadence",
   "telegram": {
     "auto_post_block_reason": null,
