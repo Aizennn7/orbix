@@ -198,9 +198,9 @@ from a test.
 
 | | |
 |---|---|
-| `a0712ef` | Remove the Android APK and Termux surface (65 files, −12,992 / +874) |
+| `a0712ef` | Remove the retired mobile packaging surface (65 files, −12,992 / +874) |
 | `f81ae54` | Replace the detailed audit with a consolidated status report |
-| `aeecefb` | Clean the last APK reference and narrow the H3 finding |
+| `aeecefb` | Clean the last stale packaging reference and narrow the H3 finding |
 | `7a80a23` | Fix the data_dir isolation bug and the three issues it blocked |
 | `94f5f56` | Refresh the report |
 | *(this commit)* | Close every remaining finding; fix H5, the manifest 404s and the snapshot generator |
